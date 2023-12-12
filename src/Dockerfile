@@ -19,7 +19,7 @@ RUN npm install
 COPY api ./api
 
 # Expor as portas para a API, consumidores e eleição
-EXPOSE 3000 3001 3002
+EXPOSE 3000
 
 # Comando para manter o contêiner rodando sem executar um processo
 CMD ["tail", "-f", "/dev/null"]

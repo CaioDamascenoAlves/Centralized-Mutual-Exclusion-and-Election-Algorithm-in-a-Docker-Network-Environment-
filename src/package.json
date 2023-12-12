@@ -22,6 +22,10 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "detectOpenHandles": true
+    "detectOpenHandles": true,
+    "testMatch": [
+      "**/__tests__/**/*.test.js",
+      "**/__tests__/**/*.int.test.js"
+    ]
   }
 }
