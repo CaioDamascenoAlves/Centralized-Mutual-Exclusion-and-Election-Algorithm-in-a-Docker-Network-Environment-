@@ -1,29 +1,29 @@
-Estados dos Processos:
-Eleição: Inicialmente, todos os processos iniciarão no estado de eleição. Eles tentarão se tornar o coordenador.
-Coordenador: O processo eleito como coordenador gerenciará as solicitações de acesso ao recurso.
-Consumidor: Processos que não são coordenadores agirão como consumidores, solicitando acesso ao recurso.
-Passo a Passo da Implementação:
-1. Estado de Eleição:
-Implementar um mecanismo de eleição com base no algoritmo de anel, usando as variáveis de ambiente ELECTION_ID, ELECTION_DEST_IPS, ELECTION_DEST_PORT e SUCCESSOR_IP.
-Iniciar temporizadores de eleição aleatórios para cada processo, que determinarão quando um processo deve iniciar uma nova eleição.
-Quando um temporizador de eleição expirar, o processo atual iniciará uma eleição:
-Montar uma mensagem de eleição com seu próprio número de processo (HOSTID) e enviar ao sucessor especificado em SUCCESSOR_IP na porta ELECTION_DEST_PORT.
-A mensagem deve conter a lista de processos em funcionamento ao longo do caminho.
-O processo eleito deve aguardar respostas dos outros processos de eleição e determinar o novo coordenador com base no maior número de processo.
-Enviar uma mensagem COORDENADOR com o novo coordenador e a lista de processos em funcionamento.
-2. Estado de Coordenador:
-O processo eleito como coordenador gerenciará as solicitações de acesso ao recurso.
-Implementar um serviço ou endpoint para receber solicitações dos consumidores.
-Gerenciar a fila de solicitações usando o algoritmo FIFO.
-Coordenar a autorização ou negação de acesso com base na FIFO.
-Manter uma lista de processos em funcionamento e responder a mensagens de eleição.
-3. Estado de Consumidor:
-Processos no estado de consumidor devem:
-Enviar solicitações de acesso ao coordenador.
-Aguardar a autorização ou negação do acesso por parte do coordenador.
-Em caso de negação ou falta de resposta, iniciar uma nova eleição.
-Manter a lista de processos em funcionamento e responder a mensagens de eleição.
-Componentes e Endpoints:
-Cada processo deve ter componentes para gerenciar o estado de eleição, coordenador e consumidor, além de manter informações sobre o líder atual, a fila de solicitações e outros processos em funcionamento.
-Implementar os endpoints necessários para cada estado, como endpoints de solicitação e resposta de eleição, solicitação e resposta de acesso, entre outros.
-Este é um plano geral para implementar a arquitetura proposta.
+Descrição do Sistema
+Este sistema é uma implementação de um sistema distribuído que utiliza um algoritmo de eleição por anel para escolher dinamicamente um coordenador entre vários nós. Cada nó pode atuar tanto como produtor quanto como coordenador, dependendo do estado atual do sistema e do resultado do processo de eleição.
+
+Componentes do Sistema
+Server (Servidor): Responsável por gerenciar as conexões de rede, como aceitar novos nós e enviar mensagens multicast.
+
+Node (Nó): Cada nó representa uma entidade no sistema que pode ser um produtor de dados ou um coordenador. Cada nó mantém informações sobre seu estado, ID, informações de rede, etc.
+
+State and Subclasses (Estado e Subclasses): Representam os diferentes estados em que um nó pode estar. Inclui estados como CoordinatorState (Estado do Coordenador) e ProducerState (Estado do Produtor).
+
+Fluxo do Algoritmo de Eleição por Anel
+O algoritmo de eleição por anel é uma parte crucial deste sistema, sendo ativado sob condições específicas, como a falha de um coordenador. Aqui está o fluxo detalhado:
+
+Detecção de Falha do Coordenador: Quando um nó percebe que o coordenador atual falhou ou está inacessível, ele inicia o processo de eleição.
+
+Início da Eleição: O nó que detecta a falha começa a eleição enviando uma mensagem de eleição para o próximo nó no anel.
+
+Propagação da Mensagem: A mensagem de eleição circula pelo anel. Cada nó, ao receber a mensagem, adiciona seu ID a ela e a passa para o próximo nó.
+
+Determinação do Coordenador: Quando a mensagem de eleição completa o círculo e retorna ao nó que iniciou a eleição, este nó analisa os IDs coletados na mensagem. O nó com o maior ID é eleito como o novo coordenador.
+
+Estabelecimento do Novo Coordenador: O nó eleito assume o papel de coordenador e começa a gerenciar as solicitações de acesso e outras tarefas coordenativas.
+
+Estados dos Nós
+CoordinatorState: Quando um nó está neste estado, ele atua como coordenador, gerenciando as solicitações de acesso e outras responsabilidades administrativas.
+
+ProducerState: Neste estado, um nó atua como produtor, possivelmente enviando solicitações de acesso ao coordenador e participando do processo de eleição se necessário.
+
+Este sistema, portanto, garante uma gestão flexível e dinâmica de coordenadores em um ambiente distribuído, permitindo uma recuperação eficiente e uma gestão robusta de falhas.
