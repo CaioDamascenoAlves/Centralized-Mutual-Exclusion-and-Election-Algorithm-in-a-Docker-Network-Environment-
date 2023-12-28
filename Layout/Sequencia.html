@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagrama de Sequência</title>
+    <style>
+        .sequence-diagram {
+            display: flex;
+            align-items: start;
+            gap: 50px;
+            padding: 20px;
+            background-color: #f8f8f8;
+        }
+        .participant {
+            position: relative;
+            padding-top: 20px;
+            text-align: center;
+        }
+        .line {
+            position: absolute;
+            top: 30px;
+            width: 2px;
+            height: 300px; /* Ajustar conforme necessário */
+            background-color: black;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .message {
+            position: absolute;
+            top: 50px; /* Ajustar para cada mensagem */
+            width: 100px; /* Ajustar conforme necessário */
+            text-align: center;
+            border: 1px solid black;
+            border-right: 0;
+            border-top-right-radius: 5px;
+            border-bottom-right-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sequence-diagram">
+        <div class="participant">
+            <div>Nó Produtor</div>
+            <div class="line"></div>
+            <div class="message" style="left: 100%;">Iniciar Eleição</div>
+        </div>
+        <div class="participant">
+            <div>Coordenador</div>
+            <div class="line"></div>
+        </div>
+        <div class="participant">
+            <div>Sucessor</div>
+            <div class="line"></div>
+        </div>
+        <div class="participant">
+            <div>Banco de Dados</div>
+            <div class="line"></div>
+        </div>
+    </div>
+</body>
+</html>

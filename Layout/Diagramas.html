@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema Distribuído - Documentação</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        h1, h2 { color: navy; }
+        p, li { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>Estrutura Refatorada do Sistema Distribuído</h1>
+    <p>Foco em Eleição por Anel e Exclusão Mútua com Classe Server para Socket.io</p>
+
+    <h2>Diagrama de Classes</h2>
+
+    <h3>Server</h3>
+    <p><strong>Responsabilidades:</strong> Gerencia a comunicação de rede entre os nós usando socket.io.</p>
+    <ul>
+        <li><strong>socketServer:</strong> Instância do servidor socket.io.</li>
+        <li><strong>nodes:</strong> Lista de todos os nós conectados.</li>
+    </ul>
+    <p><strong>Métodos:</strong></p>
+    <ul>
+        <li>initialize(): Inicializa o servidor socket.io e configura os ouvintes de eventos.</li>
+        <li>broadcastMessage(message): Envia uma mensagem para todos os nós conectados.</li>
+        <li>onConnection(socket): Lida com novas conexões de nó.</li>
+    </ul>
+
+    <h3>Node</h3>
+    <p><strong>Alterações:</strong> Adicionado mecanismo de comunicação com o Server via socket.io.</p>
+    <p><strong>Métodos Adicionais:</strong></p>
+    <ul>
+        <li>connectToServer(): Conecta-se ao Server usando socket.io.</li>
+        <li>sendMessageToServer(message): Envia uma mensagem ao Server.</li>
+        <li>onMessageReceived(message): Lida com mensagens recebidas do Server.</li>
+    </ul>
+
+    <h2>Diagrama de Estados</h2>
+    <p>Estados COORDENADOR, PRODUTOR, ELEIÇÃO incluem a lógica de comunicação com o Server durante transições de estado e operações.</p>
+
+    <h2>Diagrama de Sequência</h2>
+    <p>Detalhamento das interações para o Processo de Eleição e Acesso ao Recurso.</p>
+
+    <h2>Diagrama de Implantação</h2>
+    <p>Server como um Contêiner Central e Nós como Contêineres Individuais.</p>
+
+    <h2>Considerações Adicionais</h2>
+    <ul>
+        <li>Escalabilidade e Resiliência: Estratégias para escalar o sistema e garantir a resiliência.</li>
+        <li>Testes com socket.io: Utilização do jest para testar a comunicação socket.io e a lógica de negócios dos nós.</li>
+        <li>Monitoramento e Logging: Implementação de logging no Server e nos Nodes.</li>
+    </ul>
+</body>
+</html>
