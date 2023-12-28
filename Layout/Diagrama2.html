@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diagrama UML com Cards</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 20px;
+        padding: 20px;
+      }
+      .card {
+        background-color: white;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 15px 20px;
+        width: 250px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      .card-title {
+        color: navy;
+        font-size: 20px;
+        margin-bottom: 15px;
+        text-align: center;
+        font-weight: bold;
+      }
+      .attributes,
+      .methods {
+        font-size: 14px;
+        color: #333;
+        margin-bottom: 15px;
+      }
+      .section-title {
+        font-weight: bold;
+        color: darkgreen;
+        margin-top: 10px;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 5px;
+      }
+      .attribute,
+      .method {
+        margin-bottom: 8px;
+        padding-left: 10px;
+        line-height: 1.4;
+      }
+      .method:before {
+        content: "⚙️";
+        margin-right: 5px;
+        color: #6a5acd;
+      }
+      .attribute:before {
+        content: "🔹";
+        margin-right: 5px;
+        color: #ffa500;
+      }
+      
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="card-title">Server</div>
+      <div class="attributes">
+        <div class="section-title">Attributes</div>
+        <div class="attribute">socketServer: SocketServer</div>
+        <div class="attribute">nodes: Map&lt;String, Socket&gt;</div>
+        <div class="attribute">multicastGroup: String</div>
+      </div>
+      <div class="methods">
+        <div class="section-title">Methods</div>
+        <div class="method">initialize(port): void</div>
+        <div class="method">handleConnection(socket): void</div>
+        <div class="method">sendMulticast(message): void</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Node</div>
+      <div class="attributes">
+        <div class="section-title">Attributes</div>
+        <div class="attribute">id: String</div>
+        <div class="attribute">hostname: String</div>
+        <div class="attribute">processId: Number</div>
+        <div class="attribute">successorIp: String</div>
+        <div class="attribute">socket: Socket</div>
+        <div class="attribute">state: State</div>
+      </div>
+      <div class="methods">
+        <div class="section-title">Methods</div>
+        <div class="method">connectToServer(serverUrl): void</div>
+        <div class="method">initiateElection(): void</div>
+        <div class="method">receiveMulticast(message): void</div>
+        <div class="method">changeState(newState): void</div>
+      </div>
+    </div>
+
+    <!-- New State card -->
+    <div class="card">
+      <div class="card-title">State and Subclasses</div>
+      <div class="attributes">
+        <div class="section-title">Attributes</div>
+        <div class="attribute">name: String</div>
+      </div>
+      <div class="methods">
+        <div class="section-title">Methods</div>
+        <div class="method">enter(node: Node): void</div>
+        <div class="method">exit(node: Node): void</div>
+      </div>
+      <div class="attributes">
+        <div class="section-title">Subclasses</div>
+        <div class="attribute">CoordinatorState</div>
+        <div class="attribute">ProducerState</div>
+      </div>
+    </div>
+
+    <!-- CoordinatorState card -->
+    <div class="card">
+      <div class="card-title">CoordinatorState</div>
+      <div class="attributes">
+        <div class="section-title">Inherits</div>
+        <div class="attribute">State</div>
+      </div>
+      <div class="attributes">
+        <div class="section-title">Attributes</div>
+        <div class="attribute">accessQueue: Array</div>
+        <div class="attribute">dbPool: Pool</div>
+      </div>
+      <div class="methods">
+        <div class="section-title">Methods</div>
+        <div class="method">enter(node): void</div>
+        <div class="method">exit(node): void</div>
+        <div class="method">requestAccess(nodeId, request): void</div>
+        <div class="method">processQueue(): void</div>
+      </div>
+    </div>
+
+    <!-- ProducerState card -->
+    <div class="card">
+      <div class="card-title">ProducerState</div>
+      <div class="attributes">
+        <div class="section-title">Inherits</div>
+        <div class="attribute">State</div>
+      </div>
+      <div class="methods">
+        <div class="section-title">Methods</div>
+        <div class="method">enter(): void</div>
+        <div class="method">sendWriteRequestToCoordinator(): void</div>
+        <div class="method">startElectionTimeout(): void</div>
+        <div class="method">clearElectionTimeout(): void</div>
+        <div class="method">initiateElection(): void</div>
+        <div class="method">handleElectionMessage(message): void</div>
+      </div>
+    </div>
+
+    <!-- Adicionando uma seção geral do sistema -->
+    <div class="card">
+      <div class="card-title">Visão Geral do Sistema</div>
+      <div class="methods">
+        <p>
+          Este sistema distribuído utiliza um algoritmo de eleição por anel para
+          determinar dinamicamente um coordenador entre os nós. Cada nó pode
+          atuar como produtor ou coordenador, dependendo do estado do sistema e
+          do resultado do processo de eleição.
+        </p>
+      </div>
+    </div>
+
+    <!-- Adicionando uma seção sobre o algoritmo de eleição por anel -->
+    <div class="card">
+      <div class="card-title">Algoritmo de Eleição por Anel</div>
+      <div class="methods">
+        <p>
+          O algoritmo de eleição por anel é ativado quando um nó detecta a
+          ausência do coordenador. O nó inicia uma mensagem de eleição, que
+          circula pelo anel, acumulando IDs dos nós. Quando a mensagem retorna
+          ao iniciador, o nó com o maior ID é eleito como o novo coordenador.
+        </p>
+        <ul>
+          <li>Sem utilização de token.</li>
+          <li>Eleição iniciada na detecção da falha do coordenador.</li>
+          <li>Os nós adicionam seus IDs à mensagem de eleição.</li>
+          <li>O coordenador é determinado pelo maior ID na mensagem.</li>
+        </ul>
+      </div>
+    </div>
+  </body>
+</html>

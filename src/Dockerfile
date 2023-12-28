@@ -1,25 +1,36 @@
-# Usando a imagem oficial do Ubuntu
+# Use a imagem oficial do Ubuntu como base
 FROM ubuntu:latest
 
-# Instalar curl , software-properties-common (para adicionar repositórios) e comandos de rede
-RUN apt-get update && apt-get install -y curl software-properties-common iproute2 net-tools iputils-ping systemd nano
+# Atualize os repositórios e instale as ferramentas necessárias
+RUN apt-get update && apt-get install -y \
+    curl \
+    software-properties-common \
+    iproute2 \
+    net-tools \
+    iputils-ping \
+    systemd \
+    nano \
+    openssh-server
 
-# Adicionar o repositório do Node.js e instalar o Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs
+# Adicione o repositório do Node.js e instale o Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
 
-# Definir como diretório de trabalho
+# Defina o diretório de trabalho para /app
 WORKDIR /app
 
-# Copiar os arquivos de definição de pacote do Node.js e instalar as dependências
+# Copie os arquivos de definição de pacote do Node.js e instale as dependências
 COPY package.json package-lock.json ./
 RUN npm install
 
-# Copiar o restante dos arquivos do projeto para o diretório do app
+# Copie o restante dos arquivos do projeto para o diretório /app/api
 COPY api ./api
 
-# Expor as portas para a API, consumidores e eleição
-EXPOSE 3000
+# Exponha as portas para a API, consumidores, eleição e SSH
+EXPOSE 3000 4000 22
+
+# Iniciar o serviço OpenSSH
+RUN service ssh start
 
 # Comando para manter o contêiner rodando sem executar um processo
 CMD ["tail", "-f", "/dev/null"]

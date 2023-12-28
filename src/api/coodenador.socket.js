@@ -5,13 +5,26 @@ const socketIo = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+
+// Configurando o Socket.io com op    es CORS para aceitar conex  es de qualquer origem
+const io = socketIo(server, {
+  cors: {
+    origin: "*" // Permite conex  es de qualquer origem
+  }
+});
+
 
 io.on("connection", (socket) => {
   console.log(`Novo cliente conectado: ${socket.id}`);
 
   socket.on("message", (data) => {
     console.log(`Mensagem recebida: ${data}`);
+
+    // Resposta espec  fica para o teste de integra    o
+    if (data === "Ol  , coordenador!") {
+      socket.emit("resposta-especifica", "Resposta esperada do coordenador");
+    }
+
     // Encaminha a mensagem para todos os consumidores conectados
     io.emit("message", data);
   });

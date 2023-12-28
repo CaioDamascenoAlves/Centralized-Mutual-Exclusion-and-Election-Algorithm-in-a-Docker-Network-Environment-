@@ -1,6 +1,6 @@
 // client.js (Consumidor)
 const io = require("socket.io-client");
-const socket = io("http://172.25.0.3:3000"); // Endereço IP do coordenador
+const socket = io("http://172.25.0.3:3000"); // Endere  o IP do coordenador
 
 socket.on("connect", () => {
   console.log("Conectado ao coordenador");
@@ -11,9 +11,9 @@ socket.on("message", (data) => {
 });
 
 // Enviar mensagem para o coordenador
-socket.emit("message", "Olá, coordenador!");
+socket.emit("message", "Ol  , coordenador!");
 
-// Tratamento de desconexão
+// Tratamento de desconex  o
 socket.on("disconnect", () => {
   console.log("Desconectado do coordenador");
 });
