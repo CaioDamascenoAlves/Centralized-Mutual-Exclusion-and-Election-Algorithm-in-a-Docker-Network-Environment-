@@ -8,6 +8,7 @@ class DistributedNode {
     this.hostId = process.env.HOSTID;
     this.hostname = process.env.HOSTNAME;
     this.processId = process.env.PROCESS_ID;
+
     this.ipList = process.env.IP_LIST.split(","); // Convertendo a string em array
     this.successorIp = process.env.SUCCESSOR_IP;
     this.localIp = process.env.IP_LOCAL;
@@ -72,7 +73,7 @@ class DistributedNode {
     client.on("connect", () => {
       console.log(`Connected to successor at ${this.successorIp}`);
     });
-
+    
     // ... outros manipuladores de eventos ...
   }
 
@@ -115,6 +116,8 @@ class DistributedNode {
     const coordinatorMessage = {
       type: "COORDINATOR",
       coordinatorId: coordinatorId,
+      localIp: process.env.IP_LOCAL
+      
     };
     this.broadcastMessage(coordinatorMessage);
   }
@@ -126,6 +129,16 @@ class DistributedNode {
         client.emit("message", message);
       }
     });
+  }
+
+  // Lida com a recepção de uma mensagem de coordenador
+  onCoordinatorMessageReceived(message) {
+    if (message.type === "COORDINATOR") {
+      console.log(`New coordinator: ${message.coordinatorId}`);
+    }
+
+    
+
   }
 }
 

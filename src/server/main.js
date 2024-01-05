@@ -1,7 +1,7 @@
-const DistributedNode = require('./DistributedNode');
+const DistributedNode = require('./DistribuitedNode');
 
 const nodeId = '1';
 const port = 3000; // Substitua pela porta apropriada
 
 const node = new DistributedNode(nodeId, port);
-node.start();
+node.initServer();
