@@ -24,7 +24,7 @@ COPY package.json package-lock.json ./
 RUN npm install
 
 # Copie o restante dos arquivos do projeto para o diretório /app/api
-COPY api ./api
+COPY server ./server
 
 # Exponha as portas para a API, consumidores, eleição e SSH
 EXPOSE 3000 4000 22
@@ -33,4 +33,4 @@ EXPOSE 3000 4000 22
 RUN service ssh start
 
 # Comando para manter o contêiner rodando sem executar um processo
-CMD ["tail", "-f", "/dev/null"]
+CMD ["node", "main.js"]

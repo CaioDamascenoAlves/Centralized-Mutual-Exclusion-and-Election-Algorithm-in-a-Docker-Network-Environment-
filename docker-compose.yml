@@ -26,8 +26,9 @@ services:
       HOSTNAME: ubuntu-node-1
       PROCESS_ID: 1
       IP_LIST: "172.25.0.4,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.4 # IP do sucessor
+      SUCCESSOR_IP: 172.25.0.4
       IP_LOCAL: 172.25.0.3
+      LIST_PORTS: 3001,3002,3003
     depends_on:
       - postgres
     networks:
@@ -46,8 +47,9 @@ services:
       HOSTNAME: ubuntu-node-2
       PROCESS_ID: 2
       IP_LIST: "172.25.0.3,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.4 # IP do sucessor
+      SUCCESSOR_IP: 172.25.0.4
       IP_LOCAL: 172.25.0.6
+      LIST_PORTS: 3000,3002,3003
     depends_on:
       - postgres
     networks:
@@ -67,7 +69,8 @@ services:
       PROCESS_ID: 3
       IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.6"
       SUCCESSOR_IP: 172.25.0.6
-      IP_LOCAL: 172.25.0.5
+      IP_LOCAL: 172.25.0.53
+      LIST_PORTS: 3000,3001,3003
     depends_on:
       - postgres
     networks:
@@ -86,8 +89,9 @@ services:
       HOSTNAME: ubuntu-node-4
       PROCESS_ID: 4
       IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5" # IPs dos outros processos de eleição
-      SUCCESSOR_IP: 172.25.0.3 # IP do sucessor
+      SUCCESSOR_IP: 172.25.0.3
       IP_LOCAL: 172.25.0.6
+      LIST_PORTS: 3000,3001,3002
     depends_on:
       - postgres
     networks:
