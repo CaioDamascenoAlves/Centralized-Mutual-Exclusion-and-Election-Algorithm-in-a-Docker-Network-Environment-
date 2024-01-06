@@ -25,7 +25,7 @@ services:
       HOSTID: 1
       HOSTNAME: ubuntu-node-1
       PROCESS_ID: 1
-      IP_LIST: "172.25.0.4,172.25.0.5,172.25.0.6"
+      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
       LIST_PORTS: 3001,3002,3003
       SUCCESSOR_IP: 172.25.0.4
       IP_LOCAL: 172.25.0.3
@@ -35,7 +35,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.3
     ports:
-      - "3000:3000"
+      - "3001:3001"
 
   ubuntu-node-2:
     build:
@@ -46,9 +46,9 @@ services:
       HOSTID: 2
       HOSTNAME: ubuntu-node-2
       PROCESS_ID: 2
-      IP_LIST: "172.25.0.3,172.25.0.5,172.25.0.6"
+      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
       SUCCESSOR_IP: 172.25.0.4
-      IP_LOCAL: 172.25.0.6
+      IP_LOCAL: 172.25.0.4
       LIST_PORTS: 3000,3002,3003
     depends_on:
       - postgres
@@ -56,7 +56,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.4
     ports:
-      - "3001:3000"
+      - "3002:3002"
 
   ubuntu-node-3:
     build:
@@ -67,9 +67,9 @@ services:
       HOSTID: 3
       HOSTNAME: ubuntu-node-3
       PROCESS_ID: 3
-      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.6"
+      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
       SUCCESSOR_IP: 172.25.0.6
-      IP_LOCAL: 172.25.0.53
+      IP_LOCAL: 172.25.0.5
       LIST_PORTS: 3000,3001,3003
     depends_on:
       - postgres
@@ -77,7 +77,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.5
     ports:
-      - "3002:3000"
+      - "3003:3003"
 
   ubuntu-node-4:
     build:
@@ -88,7 +88,7 @@ services:
       HOSTID: 4
       HOSTNAME: ubuntu-node-4
       PROCESS_ID: 4
-      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5" # IPs dos outros processos de eleição
+      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
       SUCCESSOR_IP: 172.25.0.3
       IP_LOCAL: 172.25.0.6
       LIST_PORTS: 3000,3001,3002
@@ -98,7 +98,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.6
     ports:
-      - "3003:3000"
+      - "3004:3004"
 
   dbadmin:
     image: dpage/pgadmin4

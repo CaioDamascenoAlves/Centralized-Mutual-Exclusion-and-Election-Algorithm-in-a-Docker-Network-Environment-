@@ -2,32 +2,52 @@ const http = require("http");
 const socketIo = require("socket.io");
 const socketClient = require("socket.io-client");
 
+const ipsToObjectSorted = require("./utils/IpsToObjectSorted")
+
 class DistributedNode {
   constructor() {
     // Variáveis de ambiente específicas de cada nó
-    this.hostId = process.env.HOSTID;
     this.hostname = process.env.HOSTNAME;
-    this.processId = process.env.PROCESS_ID;
     this.localIp = process.env.IP_LOCAL;
-    this.port = parseInt(`300${process.env.HOSTID}`) || 3000; // parseInt(process.env.NODE_PORT) || 3000;
-    this.ipList = process.env.IP_LIST.split(","); // Convertendo a string em array
+    this.port = parseInt(process.env.NODE_PORT) || 3000;
     
+    this.id = null;
     this.io = null;
     this.server = null;
-    this.successorIp = null
+    this.ipList = null;
+    this.successorIp = null;
   }
 
   initServer() {
-    this.server =  http.createServer();
+    this.server = http.createServer();
 
-    this.io =  socketIo(this.server, {
+    this.io = socketIo(this.server, {
       cors: {
         origin: "*",
         methods: ["GET", "POST"],
       },
     });
 
-     this.io.on("connection", (socket) => {
+    this.server.listen(this.port, () => {
+      console.log(`Node server running on port ${this.port}`); 
+    });
+  
+    this.ipList = ipsToObjectSorted(process.env.IP_LIST);
+
+    let parts = this.localIp.split('.');
+    this.id = parseInt(parts[parts.length - 1]);
+    this.successorIp = this.ipList[this.id + 1];
+
+    console.log(`Variáveis de ambiente:`);
+    console.log(`Hostname: ${this.hostname}`);
+    console.log(`IP Local: ${this.localIp}`);
+    console.log(`Porta: ${this.port}`);
+    console.log(`ID: ${this.id}`);
+    console.log(`IP sucessor: ${this.successorIp}`);
+    console.log('Lista de IPs:');
+    console.table(this.ipList);
+
+    this.io.on("connection", (socket) => {
       
       let clientIp = socket.request.connection.remoteAddress;
       if (clientIp.substr(0, 7) === "::ffff:") {
@@ -40,46 +60,46 @@ class DistributedNode {
       socket.on("event_name", (data) => {
         // Lógica de manipulação do evento
       });
-
-    });
-
-     this.server.listen(this.port, () => {
-      console.log(`Node server running on port ${this.port}`); 
     });
   }
 
   // Conecta ao nó sucessor
   connectToSuccessor() {
-    // Define o IP do nó sucessor
-    let ipAddress = this.localIp;
-    let parts = ipAddress.split('.');
-    let lastNumber = Math.min(parseInt(parts[parts.length - 1], 10) + 1, 255);
-    parts[parts.length - 1] = lastNumber.toString();
-    let successorIp = parts.join('.');
-    this.successorIp = successorIp
-
     // Estabelece conexão com nó sucessor
-    let client = socketClient(`http://127.0.0.1:3002`); //socketClient(`http://${this.successorIp}:3000`);
+    let client = socketClient(`http://${this.successorIp}:3000`);
 
     setTimeout(() => {
       if(client.on().connected){
         console.log(`Conectado ao sucessor ${this.successorIp}`);
       }
       else{
-        let parts = ipAddress.split('.');
-        parts[parts.length - 1] = 3;
-        let successorIp =  parts.join('.');
-        this.successorIp = successorIp
-  
-        let client = socketClient(`http://127.0.0.1:3001`); //socketClient(`http://172.25.0.3:3000`);
+        var ids = Object.keys(this.ipList);
+
+        for (const id of ids) {
+          if(parseInt(id) > this.id) {
+            
+            let client = socketClient(`http://${this.ipList[id]}:3000`);
+
+            setTimeout(() => {
+              if(client.on().connected){
+                this.successorIp = this.ipList[id];
+                console.log(`Conectado ao sucessor ${this.successorIp}`);
+                return
+              }
+            }, 3000);
+          }
+        }
+
+        let client = socketClient(`http://${this.ipList[ids[0]]}:3000`);
         
         setTimeout(() => {
-          if(!client.on().connected){
-            console.log(`Erro ao conectar-se a ${this.successorIp}`);
+          if(client.on().connected){
+            this.successorIp = this.ipList[ids[0]];
+            console.log(`Conectado ao sucessor ${this.successorIp}`);
             return
           }
-    
-          console.log(`Conectado ao sucessor ${this.successorIp}`);
+          console.log(`Erro ao conectar-se a ${this.successorIp}`);
+          this.successorIp = null;
           return
         }, 3000);
       }
