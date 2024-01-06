@@ -8,46 +8,87 @@ class DistributedNode {
     this.hostId = process.env.HOSTID;
     this.hostname = process.env.HOSTNAME;
     this.processId = process.env.PROCESS_ID;
-
-    this.ipList = process.env.IP_LIST.split(","); // Convertendo a string em array
-    this.successorIp = process.env.SUCCESSOR_IP;
     this.localIp = process.env.IP_LOCAL;
-    this.listPorts = process.env.LIST_PORTS.split(",").map(Number); // Convertendo a string em array e em números
-
-    // Configurações de rede do nó
-    this.server = null;
+    this.port = parseInt(`300${process.env.HOSTID}`) || 3000; // parseInt(process.env.NODE_PORT) || 3000;
+    this.ipList = process.env.IP_LIST.split(","); // Convertendo a string em array
+    
     this.io = null;
-    this.port = parseInt(process.env.NODE_PORT) || 3000; // Usando a porta padrão 3000 se não estiver definida
+    this.server = null;
+    this.successorIp = null
   }
 
   initServer() {
-    this.server = http.createServer();
-    this.io = socketIo(this.server, {
+    this.server =  http.createServer();
+
+    this.io =  socketIo(this.server, {
       cors: {
-        origin: "*", // Defina as políticas de CORS conforme necessário
+        origin: "*",
         methods: ["GET", "POST"],
       },
     });
 
-    this.io.on("connection", (socket) => {
-      console.log(`Node connected: ${socket.id}`);
+     this.io.on("connection", (socket) => {
+      
+      let clientIp = socket.request.connection.remoteAddress;
+      if (clientIp.substr(0, 7) === "::ffff:") {
+        clientIp = clientIp.substr(7)
+      }
+      console.log(`IP ${clientIp} estabeleceu conexão!`);
+      socket.emit('conexaoConfirmada', { mensagem: 'Conexão bem-sucedida!' });
 
       // Tratar eventos específicos aqui
       socket.on("event_name", (data) => {
         // Lógica de manipulação do evento
       });
 
-      // ...
     });
 
-    this.server.listen(this.port, () => {
-      console.log(`Node server running on port ${this.port}`);
+     this.server.listen(this.port, () => {
+      console.log(`Node server running on port ${this.port}`); 
     });
+  }
+
+  // Conecta ao nó sucessor
+  connectToSuccessor() {
+    // Define o IP do nó sucessor
+    let ipAddress = this.localIp;
+    let parts = ipAddress.split('.');
+    let lastNumber = Math.min(parseInt(parts[parts.length - 1], 10) + 1, 255);
+    parts[parts.length - 1] = lastNumber.toString();
+    let successorIp = parts.join('.');
+    this.successorIp = successorIp
+
+    // Estabelece conexão com nó sucessor
+    let client = socketClient(`http://127.0.0.1:3002`); //socketClient(`http://${this.successorIp}:3000`);
+
+    setTimeout(() => {
+      if(client.on().connected){
+        console.log(`Conectado ao sucessor ${this.successorIp}`);
+      }
+      else{
+        let parts = ipAddress.split('.');
+        parts[parts.length - 1] = 3;
+        let successorIp =  parts.join('.');
+        this.successorIp = successorIp
+  
+        let client = socketClient(`http://127.0.0.1:3001`); //socketClient(`http://172.25.0.3:3000`);
+        
+        setTimeout(() => {
+          if(!client.on().connected){
+            console.log(`Erro ao conectar-se a ${this.successorIp}`);
+            return
+          }
+    
+          console.log(`Conectado ao sucessor ${this.successorIp}`);
+          return
+        }, 3000);
+      }
+    }, 3000);
   }
 
   connectToOtherNodes() {
     this.ipList.forEach((ip) => {
-      const client = ioClient(`http://${ip}`, {
+      const client = socketClient(`http://${ip}:`, {
         // Opções adicionais, se necessário
       });
 
@@ -63,18 +104,6 @@ class DistributedNode {
 
       this.clients.set(ip, client);
     });
-  }
-
-  // Conecta ao nó sucessor
-  connectToSuccessor() {
-    const client = ioClient(`http://${this.successorIp}:${this.port}`);
-    this.clients.set(this.successorIp, client);
-
-    client.on("connect", () => {
-      console.log(`Connected to successor at ${this.successorIp}`);
-    });
-    
-    // ... outros manipuladores de eventos ...
   }
 
   // Inicia a eleição
