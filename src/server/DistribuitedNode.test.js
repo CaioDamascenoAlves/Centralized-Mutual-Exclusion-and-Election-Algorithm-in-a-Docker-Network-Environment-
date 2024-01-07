@@ -110,14 +110,14 @@ describe("DistributedNode Environment Variables", () => {
       const node = new DistributedNode();
 
       // Verifica se os valores correspondem ao esperado
-      expected(node.hostId).toBe(expected.hostId);
-      expected(node.hostname).toBe(expected.hostname);
-      expected(node.processId).toBe(expected.processId);
-      expected(node.ipList).toEqual(expected.ipList);
-      expected(node.successorIp).toBe(expected.successorIp);
-      expected(node.localIp).toBe(expected.localIp);
-      expected(node.listPorts).toEqual(expected.listPorts);
-      expected(node.port).toBe(expected.port);
+      expect(node.hostId).toBe(expected.hostId);
+      expect(node.hostname).toBe(expected.hostname);
+      expect(node.processId).toBe(expected.processId);
+      expect(node.ipList).toEqual(expected.ipList);
+      expect(node.successorIp).toBe(expected.successorIp);
+      expect(node.localIp).toBe(expected.localIp);
+      expect(node.listPorts).toEqual(expected.listPorts);
+      expect(node.port).toBe(expected.port);
     });
   });
 });

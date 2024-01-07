@@ -33,4 +33,4 @@ EXPOSE 3000 4000 22
 RUN service ssh start
 
 # Comando para manter o contêiner rodando sem executar um processo
-CMD ["npm", "run", "nodemon"]
+CMD ["npm", "run","nodemon"]

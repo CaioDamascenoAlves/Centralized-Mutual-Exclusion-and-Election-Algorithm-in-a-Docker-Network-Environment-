@@ -1,6 +1,5 @@
 const http = require("http");
 const socketIo = require("socket.io");
-const socketClient = require("socket.io-client");
 
 class DistributedNode {
   constructor() {

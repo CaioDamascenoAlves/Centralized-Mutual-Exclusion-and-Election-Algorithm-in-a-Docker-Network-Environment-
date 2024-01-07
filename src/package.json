@@ -31,8 +31,7 @@
     "testEnvironment": "node",
     "detectOpenHandles": true,
     "testMatch": [
-      "**/__tests__/**/*.test.js",
-      "**/__tests__/**/*.int.test.js"
+      "**/server/**/*.test.js"
     ]
   }
 }
