@@ -1,8 +1,13 @@
 const http = require("http");
 const socketIo = require("socket.io");
 const socketClient = require("socket.io-client");
+const { Pool } = require("pg");
 
-const ipsToObjectSorted = require("./utils/IpsToObjectSorted")
+const ipsToObjectSorted = require("./utils/IpsToObjectSorted");
+
+const MIN_INTERVAL = 5000; // 5 segundos
+const MAX_INTERVAL = 15000; // 15 segundos
+const TIMEOUT_LIMIT = 7000; // 7 segundos para timeout
 
 class DistributedNode {
   constructor() {
@@ -10,12 +15,24 @@ class DistributedNode {
     this.hostname = process.env.HOSTNAME;
     this.localIp = process.env.IP_LOCAL;
     this.port = parseInt(process.env.NODE_PORT) || 3000;
-    
+
     this.id = null;
     this.io = null;
     this.server = null;
     this.ipList = null;
     this.successorIp = null;
+
+    // Processar IP_LIST para extrair os IDs
+    this.ipList = process.env.IP_LIST.split(",").map((ip) => ip.trim());
+    this.id = parseInt(this.localIp.split(".").pop());
+
+    // Determinar o coordenador baseado no maior ID
+    this.coordinatorId = Math.max(
+      ...this.ipList.map((ip) => parseInt(ip.split(".").pop()))
+    );
+    this.isCoordinator = this.id === this.coordinatorId;
+
+    this.requestQueue = []; // Fila para gerenciar as requisições
   }
 
   initServer() {
@@ -29,81 +46,277 @@ class DistributedNode {
     });
 
     this.server.listen(this.port, () => {
-      console.log(`Node server running on port ${this.port}`); 
+      console.log(`Node server running on port ${this.port}`);
     });
-  
+
     this.ipList = ipsToObjectSorted(process.env.IP_LIST);
 
-    let parts = this.localIp.split('.');
+    let parts = this.localIp.split(".");
     this.id = parseInt(parts[parts.length - 1]);
     this.successorIp = this.ipList[this.id + 1];
 
-    console.log(`Variáveis de ambiente:`);
-    console.log(`Hostname: ${this.hostname}`);
-    console.log(`IP Local: ${this.localIp}`);
-    console.log(`Porta: ${this.port}`);
-    console.log(`ID: ${this.id}`);
-    console.log(`IP sucessor: ${this.successorIp}`);
-    console.log('Lista de IPs:');
-    console.table(this.ipList);
+    // console.log(`Variáveis de ambiente:`);
+    // console.log(`Hostname: ${this.hostname}`);
+    // console.log(`IP Local: ${this.localIp}`);
+    // console.log(`Porta: ${this.port}`);
+    // console.log(`ID: ${this.id}`);
+    // console.log(`IP sucessor: ${this.successorIp}`);
+    // console.log("Lista de IPs:");
+    // console.table(this.ipList);
 
     this.io.on("connection", (socket) => {
-      
       let clientIp = socket.request.connection.remoteAddress;
       if (clientIp.substr(0, 7) === "::ffff:") {
-        clientIp = clientIp.substr(7)
+        clientIp = clientIp.substr(7);
       }
       console.log(`IP ${clientIp} estabeleceu conexão!`);
-      socket.emit('conexaoConfirmada', { mensagem: 'Conexão bem-sucedida!' });
+      socket.emit("conexaoConfirmada", { mensagem: "Conexão bem-sucedida!" });
 
       // Tratar eventos específicos aqui
       socket.on("event_name", (data) => {
         // Lógica de manipulação do evento
       });
     });
+
+    if (this.isCoordinator) {
+      console.log(`SOU O COORDENADOR INICIAL: ${this.coordinatorId}`);
+      this.setupCoordinatorServer();
+    } else {
+      this.setupRegularNodeServer();
+      console.log("Não é o coordenador");
+    }
   }
 
+  // Conectar ao banco de dados
+  connectToDatabase() {
+    // Configuração do banco de dados
+    const dbConfig = {
+      host: "172.25.0.2",
+      port: 5432,
+      user: "user",
+      password: "password",
+      database: "distributed_systems_db",
+    };
+
+    this.dbPool = new Pool(dbConfig);
+
+    this.dbPool.connect((error) => {
+      if (error) {
+        console.error("Erro ao conectar no banco de dados:", error);
+        return;
+      }
+
+      console.log("Conectado ao banco de dados PostgreSQL com sucesso.");
+    });
+  }
+
+  // Configurar servidor do coordenador
+  setupCoordinatorServer() {
+    this.connectToDatabase();
+
+    this.io.on("connection", (socket) => {
+      console.log("Nó conectado:", socket.id);
+  
+      socket.on("simple_request", (data) => {
+        console.log("Recebida solicitação simples:", data);
+        socket.emit("simple_response", { message: "Hello from coordinator" });
+      });
+    });
+
+    // this.io.on("log_request", (data) => {
+    //   console.log("Recebida solicitação de log:", data);
+    //   this.processRequest(data);
+    // });
+
+    // // Iniciar o processamento da fila
+    // this.initQueueProcessing();
+  }
+  // Adiciona uma requisição à fila
+  addToQueue(data) {
+    this.requestQueue.push(data);
+    console.log("Requisição adicionada à fila:", data);
+  }
+
+  // Inicia o processamento da fila
+  initQueueProcessing() {
+    setInterval(() => {
+      this.processNextInQueue();
+    }, 1000); // Ajuste o intervalo conforme necessário
+  }
+
+  // Processa o próximo item na fila
+  processNextInQueue() {
+    if (this.requestQueue.length > 0) {
+      const request = this.requestQueue.shift(); // Retira o primeiro item da fila
+      this.processRequest(request);
+    }
+  }
+
+  // Processa uma requisição específica
+  processRequest(request) {
+    console.log("Processando requisição:", request);
+
+    const queryText =
+      "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
+    const values = [request.hostname, new Date(request.timestamp)];
+
+    this.dbPool.query(queryText, values, (err, res) => {
+      if (err) {
+        console.error("Erro ao gravar no banco de dados:", err.stack);
+        this.io.emit(`log_response-${request.requestId}`, {
+          status: "Failure",
+          error: err.message,
+        });
+      } else {
+        console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
+        this.io.emit(`log_response-${request.requestId}`, {
+          status: "Success",
+          data: res.rows[0],
+        });
+      }
+    });
+  }
   // Conecta ao nó sucessor
   connectToSuccessor() {
     // Estabelece conexão com nó sucessor
     let client = socketClient(`http://${this.successorIp}:3000`);
 
     setTimeout(() => {
-      if(client.on().connected){
+      if (client.on().connected) {
         console.log(`Conectado ao sucessor ${this.successorIp}`);
-      }
-      else{
+      } else {
         var ids = Object.keys(this.ipList);
 
         for (const id of ids) {
-          if(parseInt(id) > this.id) {
-            
+          if (parseInt(id) > this.id) {
             let client = socketClient(`http://${this.ipList[id]}:3000`);
 
             setTimeout(() => {
-              if(client.on().connected){
+              if (client.on().connected) {
                 this.successorIp = this.ipList[id];
                 console.log(`Conectado ao sucessor ${this.successorIp}`);
-                return
+                return;
               }
             }, 3000);
           }
         }
 
         let client = socketClient(`http://${this.ipList[ids[0]]}:3000`);
-        
+
         setTimeout(() => {
-          if(client.on().connected){
+          if (client.on().connected) {
             this.successorIp = this.ipList[ids[0]];
             console.log(`Conectado ao sucessor ${this.successorIp}`);
-            return
+            return;
           }
           console.log(`Erro ao conectar-se a ${this.successorIp}`);
           this.successorIp = null;
-          return
+          return;
         }, 3000);
       }
     }, 3000);
+  }
+
+  // Configura o servidor em um nó regular
+  setupRegularNodeServer() {
+    console.log("Configurando servidor para nó regular.");
+
+    // Estabelece conexão com o servidor do coordenador
+    this.connectToCoordinator();
+
+    // Configuração adicional necessária para um nó regular
+    // Por exemplo, pode ser necessário configurar ouvintes de eventos,
+    // agendar tarefas periódicas, etc.
+    this.setupRegularNodeTasks();
+
+    // Configurar ouvintes para eventos relacionados à eleição
+    this.io.on("coordinator_changed", (newCoordinatorId) => {
+      this.updateCoordinator(newCoordinatorId);
+    });
+  }
+
+  // Estabelece conexão com o coordenador
+  connectToCoordinator() {
+    const coordinatorUrl = `http://${this.ipList[this.coordinatorId]}:3000`;
+    this.coordinatorClient = socketClient(coordinatorUrl);
+
+     this.coordinatorClient.on("connect", () => {
+    console.log(`Conectado ao coordenador no endereço ${coordinatorUrl}`);
+    // Envie uma mensagem simples para o coordenador assim que a conexão for estabelecida
+    this.coordinatorClient.emit("simple_request", { message: "Hello from regular node" });
+  });
+
+  this.coordinatorClient.on("simple_response", (data) => {
+    console.log("Resposta recebida do coordenador:", data.message);
+    // Desconecta após receber a resposta
+    this.coordinatorClient.disconnect();
+  });
+
+  this.coordinatorClient.on("disconnect", () => {
+    console.log("Desconectado do coordenador.");
+  });
+
+    // Tratar outros eventos ou enviar mensagens conforme necessário
+  }
+
+  // Atualiza as informações do coordenador e reconecta
+  updateCoordinator(newCoordinatorId) {
+    if (newCoordinatorId !== this.coordinatorId) {
+      this.coordinatorId = newCoordinatorId;
+      console.log(`Novo coordenador eleito: ${newCoordinatorId}`);
+
+      // Desconectar do coordenador antigo, se necessário
+      if (this.coordinatorClient && this.coordinatorClient.connected) {
+        this.coordinatorClient.disconnect();
+      }
+
+      // Estabelecer nova conexão com o coordenador
+      this.connectToCoordinator();
+    }
+  }
+
+  // Inicia um ciclo de solicitações aleatórias ao coordenador
+  initiateRandomRequests() {
+    const sendRequest = () => {
+      const requestData = {
+        hostname: this.hostname,
+        timestamp: Date.now(),
+      };
+
+      // Define um identificador único para cada solicitação
+      const requestId = `req-${requestData.timestamp}-${Math.random()}`;
+      requestData.requestId = requestId;
+
+      // Aguarda resposta com tempo limitado
+      const timeout = setTimeout(() => {
+        console.log(
+          "Tempo de resposta excedido para a solicitação ao coordenador."
+        );
+        this.coordinatorClient.off(`log_response-${requestId}`);
+      }, TIMEOUT_LIMIT);
+
+      // Configura um ouvinte para a resposta específica desta solicitação
+      this.coordinatorClient.once(`log_response-${requestId}`, (response) => {
+        clearTimeout(timeout);
+        console.log("Resposta recebida do coordenador:", response);
+        this.coordinatorClient.off(`log_response-${requestId}`);
+      });
+
+      this.coordinatorClient.emit("log_request", requestData);
+    };
+
+    // Envia solicitações aleatoriamente
+    setInterval(() => {
+      const randomDelay = Math.random() * MAX_INTERVAL;
+      setTimeout(sendRequest, randomDelay);
+    }, MIN_INTERVAL);
+  }
+
+  // Configura tarefas específicas para um nó regular
+  setupRegularNodeTasks() {
+    // Aqui você pode configurar tarefas que os nós regulares precisam executar
+    // Por exemplo, enviar dados periodicamente para o coordenador,
+    // ou realizar tarefas internas
   }
 
   connectToOtherNodes() {
@@ -165,8 +378,7 @@ class DistributedNode {
     const coordinatorMessage = {
       type: "COORDINATOR",
       coordinatorId: coordinatorId,
-      localIp: process.env.IP_LOCAL
-      
+      localIp: process.env.IP_LOCAL,
     };
     this.broadcastMessage(coordinatorMessage);
   }
@@ -185,9 +397,6 @@ class DistributedNode {
     if (message.type === "COORDINATOR") {
       console.log(`New coordinator: ${message.coordinatorId}`);
     }
-
-    
-
   }
 }
 
