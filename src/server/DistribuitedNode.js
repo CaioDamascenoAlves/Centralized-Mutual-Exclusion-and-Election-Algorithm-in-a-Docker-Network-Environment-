@@ -1,8 +1,9 @@
 const http = require("http");
 const socketIo = require("socket.io");
-const socketClient = require("socket.io-client");
 
-const ipsToObjectSorted = require("./utils/IpsToObjectSorted")
+const ipsToObjectSorted = require("./utils/IpsToObjectSorted");
+const connecToNode = require("./utils/ConnecToNode");
+const getClientIp = require("./utils/GetClientIp");
 
 class DistributedNode {
   constructor() {
@@ -16,12 +17,15 @@ class DistributedNode {
     this.server = null;
     this.ipList = null;
     this.successorIp = null;
+    this.coordinatorIp = null;
+    this.isCoordinator = false;
+    this.allNodes = {}
   }
 
-  initServer() {
+  async initServer() {
     this.server = http.createServer();
 
-    this.io = socketIo(this.server, {
+    this.io = await socketIo(this.server, {
       cors: {
         origin: "*",
         methods: ["GET", "POST"],
@@ -48,147 +52,116 @@ class DistributedNode {
     console.table(this.ipList);
 
     this.io.on("connection", (socket) => {
-      
-      let clientIp = socket.request.connection.remoteAddress;
-      if (clientIp.substr(0, 7) === "::ffff:") {
-        clientIp = clientIp.substr(7)
-      }
-      console.log(`IP ${clientIp} estabeleceu conexão!`);
-      socket.emit('conexaoConfirmada', { mensagem: 'Conexão bem-sucedida!' });
 
-      // Tratar eventos específicos aqui
-      socket.on("event_name", (data) => {
-        // Lógica de manipulação do evento
+      // Evento - Resposta se é coordenador
+      socket.on("AreYouCoordinator", async(data) => {
+        console.log(data)
+        //let client = await connecToNode(`${clientIp}`);
+        let client = await connecToNode(`${clientIp}:3002`);
+        client.emit('IamCoordinator', { isCoordinator: this.isCoordinator });
       });
+
+      // Evento - Requisição quem é o coodenador
+      socket.on("IamCoordinator", async (data) => {
+        if(data && data.isCoordinator) {
+          this.coordinatorIp = await getClientIp(socket);
+        }
+        console.log("aaaa");
+        console.log(socket.request.connection.remoteAddress);
+        console.log(getClientIp(socket));
+        console.log(this.coordinatorIp);
+      });
+
     });
+
+    //await this.verifyCoordinator();
+
+    await this.connectAllNodes();
+    console.log(this.allNodes) 
+  }
+  
+  // Conecta com todos os nós
+  async connectAllNodes() {
+    let ids = Object.keys(this.ipList);
+
+    for (const id of ids) {
+      if(parseInt(id) !== this.id) {
+        
+        let client = await connecToNode('127.0.0.1:3003');
+        //let client = await connecToNode(this.ipList[id]);
+
+        if(client && client.on().connected){ 
+          this.allNodes = {
+            ...this.allNodes,
+            [id]: client,
+          }
+        }
+      }
+    }
   }
 
   // Conecta ao nó sucessor
-  connectToSuccessor() {
+  async connectToSuccessor() {
+
     // Estabelece conexão com nó sucessor
-    let client = socketClient(`http://${this.successorIp}:3000`);
+    //let client = await connecToNode(this.successorIp);
+    let client = await connecToNode('127.0.0.1:3003');
 
-    setTimeout(() => {
-      if(client.on().connected){
-        console.log(`Conectado ao sucessor ${this.successorIp}`);
-      }
-      else{
-        var ids = Object.keys(this.ipList);
+    if(client && client.on().connected){
+      console.log(`Conectado ao sucessor ${this.successorIp}`);
+      return client
+    }
+    else{
+      var ids = Object.keys(this.ipList);
 
-        for (const id of ids) {
-          if(parseInt(id) > this.id) {
-            
-            let client = socketClient(`http://${this.ipList[id]}:3000`);
+      for (const id of ids) {
+        if(parseInt(id) > this.id) {
+          
+          let client = await connecToNode(this.ipList[id]);
 
-            setTimeout(() => {
-              if(client.on().connected){
-                this.successorIp = this.ipList[id];
-                console.log(`Conectado ao sucessor ${this.successorIp}`);
-                return
-              }
-            }, 3000);
+          if(client && client.on().connected){
+            this.successorIp = this.ipList[id];
+            console.log(`Conectado ao sucessor ${this.successorIp}`);
+            return client;
           }
         }
-
-        let client = socketClient(`http://${this.ipList[ids[0]]}:3000`);
-        
-        setTimeout(() => {
-          if(client.on().connected){
-            this.successorIp = this.ipList[ids[0]];
-            console.log(`Conectado ao sucessor ${this.successorIp}`);
-            return
-          }
-          console.log(`Erro ao conectar-se a ${this.successorIp}`);
-          this.successorIp = null;
-          return
-        }, 3000);
       }
-    }, 3000);
-  }
 
-  connectToOtherNodes() {
-    this.ipList.forEach((ip) => {
-      const client = socketClient(`http://${ip}:`, {
-        // Opções adicionais, se necessário
-      });
-
-      client.on("connect", () => {
-        console.log(`Connected to node at ${ip}`);
-        // Enviar informações ou sincronizar estado, se necessário
-      });
-
-      // Tratar eventos específicos aqui
-      client.on("event_name", (data) => {
-        // Lógica de manipulação do evento
-      });
-
-      this.clients.set(ip, client);
-    });
-  }
-
-  // Inicia a eleição
-  startElection() {
-    const message = {
-      type: "ELECTION",
-      processIds: [this.processId],
-    };
-    this.sendMessageToSuccessor(message);
-  }
-
-  // Envia uma mensagem para o nó sucessor
-  sendMessageToSuccessor(message) {
-    const successorClient = this.clients.get(this.successorIp);
-    if (successorClient && successorClient.connected) {
-      successorClient.emit("message", message);
-    } else {
-      console.log("Erro: Não conectado ao nó sucessor.");
-    }
-  }
-
-  // Lida com a recepção de uma mensagem de eleição
-  onElectionMessageReceived(message) {
-    if (message.type === "ELECTION") {
-      if (message.processIds.includes(this.processId)) {
-        // A mensagem retornou ao iniciador
-        const maxProcessId = Math.max(...message.processIds);
-        this.announceCoordinator(maxProcessId);
-      } else {
-        // Adiciona o próprio process_id e passa a mensagem adiante
-        message.processIds.push(this.processId);
-        this.sendMessageToSuccessor(message);
-      }
-    }
-  }
-
-  // Anuncia o coordenador
-  announceCoordinator(coordinatorId) {
-    const coordinatorMessage = {
-      type: "COORDINATOR",
-      coordinatorId: coordinatorId,
-      localIp: process.env.IP_LOCAL
+      let client = await connecToNode(this.ipList[ids[0]]);
       
-    };
-    this.broadcastMessage(coordinatorMessage);
-  }
-
-  // Envia uma mensagem para todos os nós conectados
-  broadcastMessage(message) {
-    this.clients.forEach((client) => {
-      if (client.connected) {
-        client.emit("message", message);
+      if(client && client.on().connected){
+        this.successorIp = this.ipList[ids[0]];
+        console.log(`Conectado ao sucessor ${this.successorIp}`);
+        return client;
       }
-    });
+      console.log(`Erro ao conectar-se a ${this.successorIp}`);
+      this.successorIp = null;
+      return null;
+    }
   }
 
-  // Lida com a recepção de uma mensagem de coordenador
-  onCoordinatorMessageReceived(message) {
-    if (message.type === "COORDINATOR") {
-      console.log(`New coordinator: ${message.coordinatorId}`);
+  async verifyCoordinator() {
+    if(this.coordinatorIp) {
+      return this.coordinatorIp;
     }
 
-    
+    let ids = Object.keys(this.ipList);
 
+    for (const id of ids) {
+      if(parseInt(id) !== this.id) {
+        
+        //let client = await connecToNode(this.ipList[id]);
+        let client = await connecToNode('127.0.0.1:3003');
+
+        if(client && client.on().connected){ 
+          this.successorIp = this.ipList[id];
+          client.emit('AreYouCoordinator', { mensagem: 'Você é o coordenador?' });
+          return null;
+        }
+      } 
+    }
   }
+
 }
 
 module.exports = DistributedNode;

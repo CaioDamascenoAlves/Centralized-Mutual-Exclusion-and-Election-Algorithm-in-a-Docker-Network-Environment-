@@ -1,6 +1,74 @@
 version: '3.8'
 
 services:
+  ubuntu-node-2:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: ubuntu-node-2
+    environment:
+      HOSTNAME: ubuntu-node-2
+      IP_LIST: "172.25.0.2,172.25.0.3,172.25.0.4,172.25.0.5"
+      IP_LOCAL: 172.25.0.2
+    depends_on:
+      - postgres
+    networks:
+      app_network:
+        ipv4_address: 172.25.0.2
+    ports:
+      - "3002:3002"
+
+  ubuntu-node-3:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: ubuntu-node-3
+    environment:
+      HOSTNAME: ubuntu-node-3
+      IP_LIST: "172.25.0.2,172.25.0.3,172.25.0.4,172.25.0.5"
+      IP_LOCAL: 172.25.0.3
+    depends_on:
+      - postgres
+    networks:
+      app_network:
+        ipv4_address: 172.25.0.3
+    ports:
+      - "3003:3003"
+
+  ubuntu-node-4:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: ubuntu-node-4
+    environment:
+      HOSTNAME: ubuntu-node-4
+      IP_LIST: "172.25.0.2,172.25.0.3,172.25.0.4,172.25.0.5"
+      IP_LOCAL: 172.25.0.4
+    depends_on:
+      - postgres
+    networks:
+      app_network:
+        ipv4_address: 172.25.0.4
+    ports:
+      - "3004:3004"
+
+  ubuntu-node-5:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: ubuntu-node-5
+    environment:
+      HOSTNAME: ubuntu-node-5
+      IP_LIST: "172.25.0.2,172.25.0.3,172.25.0.4,172.25.0.5"
+      IP_LOCAL: 172.25.0.5
+    depends_on:
+      - postgres
+    networks:
+      app_network:
+        ipv4_address: 172.25.0.5
+    ports:
+      - "3005:3005"
+  
   postgres:
     image: postgres:latest
     container_name: postgres
@@ -14,91 +82,7 @@ services:
       - "5432:5432"
     networks:
       app_network:
-        ipv4_address: 172.25.0.2
-
-  ubuntu-node-1:
-    build:
-      context: ./src
-      dockerfile: Dockerfile
-    container_name: ubuntu-node-1
-    environment:
-      HOSTID: 1
-      HOSTNAME: ubuntu-node-1
-      PROCESS_ID: 1
-      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      LIST_PORTS: 3001,3002,3003
-      SUCCESSOR_IP: 172.25.0.4
-      IP_LOCAL: 172.25.0.3
-    depends_on:
-      - postgres
-    networks:
-      app_network:
-        ipv4_address: 172.25.0.3
-    ports:
-      - "3001:3001"
-
-  ubuntu-node-2:
-    build:
-      context: ./src
-      dockerfile: Dockerfile
-    container_name: ubuntu-node-2
-    environment:
-      HOSTID: 2
-      HOSTNAME: ubuntu-node-2
-      PROCESS_ID: 2
-      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.4
-      IP_LOCAL: 172.25.0.4
-      LIST_PORTS: 3000,3002,3003
-    depends_on:
-      - postgres
-    networks:
-      app_network:
-        ipv4_address: 172.25.0.4
-    ports:
-      - "3002:3002"
-
-  ubuntu-node-3:
-    build:
-      context: ./src
-      dockerfile: Dockerfile
-    container_name: ubuntu-node-3
-    environment:
-      HOSTID: 3
-      HOSTNAME: ubuntu-node-3
-      PROCESS_ID: 3
-      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.6
-      IP_LOCAL: 172.25.0.5
-      LIST_PORTS: 3000,3001,3003
-    depends_on:
-      - postgres
-    networks:
-      app_network:
-        ipv4_address: 172.25.0.5
-    ports:
-      - "3003:3003"
-
-  ubuntu-node-4:
-    build:
-      context: ./src
-      dockerfile: Dockerfile
-    container_name: ubuntu-node-4
-    environment:
-      HOSTID: 4
-      HOSTNAME: ubuntu-node-4
-      PROCESS_ID: 4
-      IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.3
-      IP_LOCAL: 172.25.0.6
-      LIST_PORTS: 3000,3001,3002
-    depends_on:
-      - postgres
-    networks:
-      app_network:
         ipv4_address: 172.25.0.6
-    ports:
-      - "3004:3004"
 
   dbadmin:
     image: dpage/pgadmin4
@@ -112,28 +96,6 @@ services:
     networks:
       app_network:
         ipv4_address: 172.25.0.7
-
-  # copy-ssh-key:
-  # build:
-  #   context: ./src
-  #   dockerfile: Dockerfile
-  # container_name: copy-ssh-key
-  # command: >
-  #   sh -c "ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-1 &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-2 &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-3 &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-4"
-  # volumes:
-  #   - ./src:/ssh-copy
-  # depends_on:
-  #   - ubuntu-node-1
-  #   - ubuntu-node-2
-  #   - ubuntu-node-3
-  #   - ubuntu-node-4
-  # networks:
-  #   app_network:
-  #     ipv4_address: 172.25.0.8
 
 networks:
   app_network:
