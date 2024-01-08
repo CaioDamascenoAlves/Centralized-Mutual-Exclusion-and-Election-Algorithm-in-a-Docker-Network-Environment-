@@ -15,6 +15,11 @@ services:
     networks:
       app_network:
         ipv4_address: 172.25.0.2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d distributed_systems_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   ubuntu-node-1:
     build:
@@ -30,7 +35,10 @@ services:
       SUCCESSOR_IP: 172.25.0.4
       IP_LOCAL: 172.25.0.3
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      dbadmin:
+        condition: service_started
     networks:
       app_network:
         ipv4_address: 172.25.0.3
@@ -51,7 +59,10 @@ services:
       IP_LOCAL: 172.25.0.4
       LIST_PORTS: 3000,3002,3003
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      dbadmin:
+        condition: service_started
     networks:
       app_network:
         ipv4_address: 172.25.0.4
@@ -72,7 +83,10 @@ services:
       IP_LOCAL: 172.25.0.5
       LIST_PORTS: 3000,3001,3003
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      dbadmin:
+        condition: service_started
     networks:
       app_network:
         ipv4_address: 172.25.0.5
@@ -93,7 +107,10 @@ services:
       IP_LOCAL: 172.25.0.6
       LIST_PORTS: 3000,3001,3002
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      dbadmin:
+        condition: service_started
     networks:
       app_network:
         ipv4_address: 172.25.0.6
@@ -109,31 +126,11 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: pgadmin4
+    depends_on:
+      - postgres
     networks:
       app_network:
         ipv4_address: 172.25.0.7
-
-  # copy-ssh-key:
-  # build:
-  #   context: ./src
-  #   dockerfile: Dockerfile
-  # container_name: copy-ssh-key
-  # command: >
-  #   sh -c "ssh-keygen -t rsa -N '' -f /root/.ssh/id_rsa &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-1 &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-2 &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-3 &&
-  #          ssh-copy-id -i /root/.ssh/id_rsa.pub ubuntu@ubuntu-node-4"
-  # volumes:
-  #   - ./src:/ssh-copy
-  # depends_on:
-  #   - ubuntu-node-1
-  #   - ubuntu-node-2
-  #   - ubuntu-node-3
-  #   - ubuntu-node-4
-  # networks:
-  #   app_network:
-  #     ipv4_address: 172.25.0.8
 
 networks:
   app_network:

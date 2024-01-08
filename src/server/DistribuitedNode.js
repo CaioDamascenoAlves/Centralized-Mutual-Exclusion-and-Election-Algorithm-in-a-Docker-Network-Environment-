@@ -116,10 +116,15 @@ class DistributedNode {
 
     this.io.on("connection", (socket) => {
       console.log("Nó conectado:", socket.id);
-  
+
       socket.on("simple_request", (data) => {
         console.log("Recebida solicitação simples:", data);
         socket.emit("simple_response", { message: "Hello from coordinator" });
+      });
+
+      socket.on("log_request", (requestData) => {
+        console.log("Recebida solicitação de log:", requestData);
+        this.processRequest(requestData, socket);
       });
     });
 
@@ -153,7 +158,7 @@ class DistributedNode {
   }
 
   // Processa uma requisição específica
-  processRequest(request) {
+  processRequest(request, socket) {
     console.log("Processando requisição:", request);
 
     const queryText =
@@ -163,19 +168,22 @@ class DistributedNode {
     this.dbPool.query(queryText, values, (err, res) => {
       if (err) {
         console.error("Erro ao gravar no banco de dados:", err.stack);
-        this.io.emit(`log_response-${request.requestId}`, {
+        // Envia a resposta através do socket especificado
+        socket.emit(`log_response-${request.requestId}`, {
           status: "Failure",
           error: err.message,
         });
       } else {
         console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
-        this.io.emit(`log_response-${request.requestId}`, {
+        // Envia a resposta através do socket especificado
+        socket.emit(`log_response-${request.requestId}`, {
           status: "Success",
           data: res.rows[0],
         });
       }
     });
   }
+
   // Conecta ao nó sucessor
   connectToSuccessor() {
     // Estabelece conexão com nó sucessor
@@ -236,28 +244,28 @@ class DistributedNode {
   }
 
   // Estabelece conexão com o coordenador
-  connectToCoordinator() {
-    const coordinatorUrl = `http://${this.ipList[this.coordinatorId]}:3000`;
-    this.coordinatorClient = socketClient(coordinatorUrl);
+connectToCoordinator() {
+  const coordinatorUrl = `http://${this.ipList[this.coordinatorId]}:3000`;
+  this.coordinatorClient = socketClient(coordinatorUrl);
 
-     this.coordinatorClient.on("connect", () => {
+  this.coordinatorClient.on("connect", () => {
     console.log(`Conectado ao coordenador no endereço ${coordinatorUrl}`);
-    // Envie uma mensagem simples para o coordenador assim que a conexão for estabelecida
-    this.coordinatorClient.emit("simple_request", { message: "Hello from regular node" });
+    // Inicia o ciclo de solicitações aleatórias ao coordenador
+    this.initiateRandomRequests();
   });
 
   this.coordinatorClient.on("simple_response", (data) => {
     console.log("Resposta recebida do coordenador:", data.message);
-    // Desconecta após receber a resposta
-    this.coordinatorClient.disconnect();
+    // Manter a conexão aberta para comunicação contínua
   });
 
   this.coordinatorClient.on("disconnect", () => {
     console.log("Desconectado do coordenador.");
+    // Reconectar ou tratar a desconexão conforme necessário
   });
 
-    // Tratar outros eventos ou enviar mensagens conforme necessário
-  }
+  // Tratar outros eventos ou enviar mensagens conforme necessário
+}
 
   // Atualiza as informações do coordenador e reconecta
   updateCoordinator(newCoordinatorId) {
@@ -279,33 +287,31 @@ class DistributedNode {
   initiateRandomRequests() {
     const sendRequest = () => {
       const requestData = {
+        type: "log_request", // Tipo de solicitação
         hostname: this.hostname,
         timestamp: Date.now(),
+        requestId: `req-${Date.now()}-${Math.random()}`, // Identificador único
       };
 
-      // Define um identificador único para cada solicitação
-      const requestId = `req-${requestData.timestamp}-${Math.random()}`;
-      requestData.requestId = requestId;
-
-      // Aguarda resposta com tempo limitado
       const timeout = setTimeout(() => {
         console.log(
-          "Tempo de resposta excedido para a solicitação ao coordenador."
+          `Tempo de resposta excedido para ${requestData.requestId}.`
         );
-        this.coordinatorClient.off(`log_response-${requestId}`);
+        this.coordinatorClient.off(`log_response-${requestData.requestId}`);
       }, TIMEOUT_LIMIT);
 
-      // Configura um ouvinte para a resposta específica desta solicitação
-      this.coordinatorClient.once(`log_response-${requestId}`, (response) => {
-        clearTimeout(timeout);
-        console.log("Resposta recebida do coordenador:", response);
-        this.coordinatorClient.off(`log_response-${requestId}`);
-      });
+      this.coordinatorClient.once(
+        `log_response-${requestData.requestId}`,
+        (response) => {
+          clearTimeout(timeout);
+          console.log("Resposta recebida do coordenador:", response);
+          this.coordinatorClient.off(`log_response-${requestData.requestId}`);
+        }
+      );
 
       this.coordinatorClient.emit("log_request", requestData);
     };
 
-    // Envia solicitações aleatoriamente
     setInterval(() => {
       const randomDelay = Math.random() * MAX_INTERVAL;
       setTimeout(sendRequest, randomDelay);
