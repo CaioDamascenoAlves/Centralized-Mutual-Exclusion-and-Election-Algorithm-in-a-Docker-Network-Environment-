@@ -32,7 +32,9 @@ class DistributedNode {
     );
     this.isCoordinator = this.id === this.coordinatorId;
 
-    this.requestQueue = []; // Fila para gerenciar as requisições
+    this.requestQueue = []; // Fila de requisições
+    this.queueLimit = 10; // Limite máximo da fila
+    this.isProcessing = false; // Flag para indicar se uma requisição está sendo processada
   }
 
   initServer() {
@@ -124,7 +126,7 @@ class DistributedNode {
 
       socket.on("log_request", (requestData) => {
         console.log("Recebida solicitação de log:", requestData);
-        this.processRequest(requestData, socket);
+        this.addToQueue(requestData, socket);
       });
     });
 
@@ -137,52 +139,63 @@ class DistributedNode {
     // this.initQueueProcessing();
   }
   // Adiciona uma requisição à fila
-  addToQueue(data) {
-    this.requestQueue.push(data);
-    console.log("Requisição adicionada à fila:", data);
-  }
+  addToQueue(requestData, socket) {
+    if (this.requestQueue.length < this.queueLimit) {
+      this.requestQueue.push({ requestData, socket });
+      console.log("Requisição adicionada à fila:", requestData);
+    } else {
+      // Opção de tratamento quando a fila está cheia
+      console.log("Fila cheia. Requisição descartada:", requestData);
+    }
 
-  // Inicia o processamento da fila
-  initQueueProcessing() {
-    setInterval(() => {
+    if (!this.isProcessing) {
       this.processNextInQueue();
-    }, 1000); // Ajuste o intervalo conforme necessário
+    }
   }
 
   // Processa o próximo item na fila
   processNextInQueue() {
     if (this.requestQueue.length > 0) {
-      const request = this.requestQueue.shift(); // Retira o primeiro item da fila
-      this.processRequest(request);
+      this.isProcessing = true;
+      const { requestData, socket } = this.requestQueue.shift();
+      this.processRequest(requestData, socket);
+    } else {
+      this.isProcessing = false;
     }
   }
+  
+// Processa uma requisição específica
+processRequest(request, socket) {
+  console.log("Processando requisição:", request);
 
-  // Processa uma requisição específica
-  processRequest(request, socket) {
-    console.log("Processando requisição:", request);
+  const queryText = "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
+  const values = [request.hostname, new Date(request.timestamp)];
 
-    const queryText =
-      "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
-    const values = [request.hostname, new Date(request.timestamp)];
-
-    this.dbPool.query(queryText, values, (err, res) => {
-      if (err) {
-        console.error("Erro ao gravar no banco de dados:", err.stack);
-        // Envia a resposta através do socket especificado
-        socket.emit(`log_response-${request.requestId}`, {
-          status: "Failure",
-          error: err.message,
-        });
-      } else {
-        console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
-        // Envia a resposta através do socket especificado
-        socket.emit(`log_response-${request.requestId}`, {
+  this.dbPool.query(queryText, values, (err, res) => {
+    if (err) {
+      console.error("Erro ao gravar no banco de dados:", err.stack);
+      // Envia a resposta através do socket especificado
+      socket.emit(`log_response-${request.requestId}`, {
+        status: "Failure",
+        error: err.message,
+      });
+    } else {
+      console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
+      // Envia a resposta através do socket especificado
+      socket.emit(`log_response-${request.requestId}`, {
           status: "Success",
           data: res.rows[0],
-        });
-      }
-    });
-  }
+      });
+    }
+
+    // Após processar, processar a próxima requisição na fila
+    setTimeout(() => {
+      this.isProcessing = false;
+      this.processNextInQueue();
+    }, 1000); // Delay para simular o processamento e garantir exclusão mútua
+  });
+}
+
 
   // Conecta ao nó sucessor
   connectToSuccessor() {
