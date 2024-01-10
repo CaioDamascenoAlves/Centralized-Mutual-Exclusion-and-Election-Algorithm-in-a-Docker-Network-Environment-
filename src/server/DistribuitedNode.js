@@ -22,6 +22,8 @@ class DistributedNode {
     this.coordinatorIp = null;
     this.isCoordinator = false;
     this.allNodes = {}
+
+    this.requestSent = false;
   }
 
   async initServer() {
@@ -40,13 +42,14 @@ class DistributedNode {
   
     this.ipList = ipsToObjectSorted(process.env.IP_LIST);
     this.id = getClientID(this.localIp)
-    this.successorIp = this.ipList[this.id + 1];
 
     this.io.on("connection", (socket) => {
 
       // Evento - Resposta se é coordenador
       socket.on("AreYouCoordinator", async(data) => {
-        socket.emit('IamCoordinator', { isCoordinator: this.isCoordinator });
+        let clientId = getClientID(getClientIp(socket))
+        let client = this.allNodes[clientId]
+        client.emit('IamCoordinator', { isCoordinator: this.isCoordinator });
       });
 
       // Evento - Requisição quem é o coodenador
@@ -58,19 +61,58 @@ class DistributedNode {
 
       // Evento - Requisição quem é o coodenador
       socket.on("YouAreCoordinator", (data) => {
-        this.coordinatorIp = this.localIp
-        this.isCoordinator = true
+        this.coordinatorIp = this.localIp;
+        this.isCoordinator = true;
       });
 
+      // Evento - Requisição em processamento
+      socket.on("RequestInProcessing", (data) => {
+        console.log(data)
+        this.requestSent = true;
+      });
+
+      // Evento - Coordenador - resposta de requisição GET
+      socket.on("RequestGet", (data) => {
+        if(this.isCoordinator) {
+          let clientId = getClientID(getClientIp(socket))
+          let client = this.allNodes[clientId]
+
+          client.emit('RequestInProcessing', { mensagem: 'Response Teste 1' });
+          //Entra na Fila
+        }
+      });
     });
     
     await this.connectAllNodes();
-    await this.verifySuccessor();
-    await this.verifyCoordinator();
+    await this.electSuccessor();
+    await this.electCoordinator();
+
+
+    // SIMULAÇÃO
+    setTimeout(async() => {
+      printEnvironmentVariables(this);
+      if(this.isCoordinator) {
+        this.isCoordinator = false;
+        this.coordinatorIp = 'Disconnect';
+        this.successorIp = 'Disconnect';
+      }
+    }, 15000);
+
+    setTimeout(async() => {
+      if(this.coordinatorIp !== 'Disconnect'){
+        await this.requestExemple();
+      }
+    }, 20000);
 
     setTimeout(async() => {
       printEnvironmentVariables(this);
-    }, 15000);
+    }, 35000);
+
+    setTimeout(async() => {
+      if(this.coordinatorIp !== 'Disconnect') {
+        await this.requestExemple();
+      }
+    }, 40000);
   }
   
   // Conecta com todos os nós
@@ -92,19 +134,21 @@ class DistributedNode {
         }
       }
     }
-
-    return true
   }
 
   // Verifica conexão com nó sucessor
-  async verifySuccessor() {
+  async electSuccessor() {
 
     if(this.successorIp) {
       let successorId = getClientID(this.successorIp)
       let successor = this.allNodes[successorId]
+
       if(successor && successor.connected) {
-        return
+        await successor.disconnect();
+        delete this.allNodes[successorId];
       }
+
+      this.successorIp = null;
     }
 
     for (const [id, socket] of Object.entries(this.allNodes)) {
@@ -115,22 +159,28 @@ class DistributedNode {
       }
     }
 
-    if(!this.successorIp){
-      let sucessor = Object.values(this.allNodes)[0];
-      let successorIp = getClientIp(sucessor);
-      this.successorIp = successorIp;
-    }
+    let sucessor = Object.values(this.allNodes)[0];
+    let successorIp = getClientIp(sucessor);
+    this.successorIp = successorIp;
   }
 
   // Verifica conexão com nó coordenador
-  async verifyCoordinator() {
+  async electCoordinator() {
 
     if(this.coordinatorIp) {
       let coordinatorId = getClientID(this.coordinatorIp)
       let coordinator = this.allNodes[coordinatorId]
+
       if(coordinator && coordinator.connected) {
-        return
+        await coordinator.disconnect();
+        delete this.allNodes[coordinatorId];
       }
+
+      if(this.coordinatorIp == this.successorIp) {
+        await this.electSuccessor()
+      }
+
+      this.coordinatorIp = null;
     }
 
     const ids = Object.keys(this.allNodes);
@@ -188,6 +238,30 @@ class DistributedNode {
     }
   }
 
+  async requestExemple() {
+
+    let coordinatorId = getClientID(this.coordinatorIp)
+    let coordinator = this.allNodes[coordinatorId]
+
+    if(coordinator && coordinator.connected) {
+      coordinator.emit('RequestGet', { mensagem: 'Request Teste 1' });
+      this.requestSent = false;
+
+      setTimeout(async() => {
+        if(this.requestSent) {
+          console.log(`Requisição em processamento!`);
+        }
+        else{
+          console.log(`Requisição sem resposta!`);
+          await this.electCoordinator();
+        }
+      }, 5000);
+    }
+    else{
+      await this.electCoordinator();
+    }
+    
+  }
 }
 
 module.exports = DistributedNode;
