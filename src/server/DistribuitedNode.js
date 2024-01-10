@@ -24,6 +24,7 @@ class DistributedNode {
     this.allNodes = {}
 
     this.requestSent = false;
+    this.electing = null;
   }
 
   async initServer() {
@@ -45,37 +46,35 @@ class DistributedNode {
 
     this.io.on("connection", (socket) => {
 
-      // Evento - Resposta se é coordenador
-      socket.on("AreYouCoordinator", async(data) => {
-        let clientId = getClientID(getClientIp(socket))
-        let client = this.allNodes[clientId]
-        client.emit('IamCoordinator', { isCoordinator: this.isCoordinator });
+      // Evento - Ouvir competição para iniciar eleição
+      socket.on("Competition", async(data) => {
+        this.electing = data.electing;
+        await this.competition(data.electing);
       });
 
-      // Evento - Requisição quem é o coodenador
-      socket.on("IamCoordinator", async (data) => {
+      // Evento - Ouvir iniciar eleição
+      socket.on("StartElection", async(data) => {
+        this.electing = null;
+        await this.processElection(data.id);
+      });
+
+      // Evento - Ouvir coodenador eleito
+      socket.on("EndOfElection", async (data) => {
         if(data && data.isCoordinator) {
           this.coordinatorIp = await getClientIp(socket);
         }
       });
 
-      // Evento - Requisição quem é o coodenador
-      socket.on("YouAreCoordinator", (data) => {
-        this.coordinatorIp = this.localIp;
-        this.isCoordinator = true;
-      });
-
       // Evento - Requisição em processamento
       socket.on("RequestInProcessing", (data) => {
-        console.log(data)
         this.requestSent = true;
       });
 
       // Evento - Coordenador - resposta de requisição GET
       socket.on("RequestGet", (data) => {
         if(this.isCoordinator) {
-          let clientId = getClientID(getClientIp(socket))
-          let client = this.allNodes[clientId]
+          let clientId = getClientID(getClientIp(socket));
+          let client = this.allNodes[clientId];
 
           client.emit('RequestInProcessing', { mensagem: 'Response Teste 1' });
           //Entra na Fila
@@ -84,10 +83,12 @@ class DistributedNode {
     });
     
     await this.connectAllNodes();
-    await this.electSuccessor();
-    await this.electCoordinator();
+    let connectedSuccessor = await this.verifySuccessor(Object.values(this.allNodes).length);
+    if(connectedSuccessor) {
+      await this.startElection(this.id);
+    }
 
-
+    
     // SIMULAÇÃO
     setTimeout(async() => {
       printEnvironmentVariables(this);
@@ -96,23 +97,28 @@ class DistributedNode {
         this.coordinatorIp = 'Disconnect';
         this.successorIp = 'Disconnect';
       }
-    }, 15000);
+    }, 5000);
 
     setTimeout(async() => {
-      if(this.coordinatorIp !== 'Disconnect'){
+      if(this.coordinatorIp !== 'Disconnect' && !this.isCoordinator){
         await this.requestExemple();
       }
-    }, 20000);
+    }, 10000);
+
 
     setTimeout(async() => {
       printEnvironmentVariables(this);
-    }, 35000);
+    }, 30000);
 
+    /*
     setTimeout(async() => {
-      if(this.coordinatorIp !== 'Disconnect') {
+      if(this.coordinatorIp !== 'Disconnect' && !this.isCoordinator) {
         await this.requestExemple();
       }
-    }, 40000);
+    }, 30000);
+
+    */
+
   }
   
   // Conecta com todos os nós
@@ -136,7 +142,27 @@ class DistributedNode {
     }
   }
 
-  // Verifica conexão com nó sucessor
+  // Verifica conexão com nó sucessor 
+  async verifySuccessor(numberOfNodes) {
+    if(this.successorIp) {
+      let successorId = getClientID(this.successorIp)
+      let successor = this.allNodes[successorId]
+  
+      if(successor && successor.connected) {
+        return true
+      }
+    }
+
+    if(numberOfNodes && numberOfNodes > 0){
+      await this.electSuccessor();
+      return await this.verifySuccessor(numberOfNodes - 1);
+    }
+    else {
+      return null;
+    }
+  }
+
+  // Conecta com nó sucessor
   async electSuccessor() {
 
     if(this.successorIp) {
@@ -164,9 +190,19 @@ class DistributedNode {
     this.successorIp = successorIp;
   }
 
-  // Verifica conexão com nó coordenador
-  async electCoordinator() {
+  // Anuncia que está iniciando uma eleição
+  async announceElection() {
+    await this.competition();
 
+    setTimeout(async() => {
+      if(this.electing == this.id) {
+        await this.startElection(this.id);
+      }
+    }, 10000);
+  }
+
+  // Disconecta do nó Coordenador
+  async disconnectCoordinator() {
     if(this.coordinatorIp) {
       let coordinatorId = getClientID(this.coordinatorIp)
       let coordinator = this.allNodes[coordinatorId]
@@ -182,62 +218,61 @@ class DistributedNode {
 
       this.coordinatorIp = null;
     }
+  }
 
-    const ids = Object.keys(this.allNodes);
-    const lastId = ids[ids.length - 1];
+  // Competição entre quem realizará a eleição
+  async competition() {
 
-    if(lastId < this.id) {
+    await this.disconnectCoordinator();
+
+    let successorId = getClientID(this.successorIp)
+    let successor = this.allNodes[successorId]
+
+    if(this.electing == this.id) {
+      return true
+    }
+    else if(!this.electing || this.electing < this.id) {
+      successor.emit('Competition', {electing: this.id});
+    }
+    else if(this.electing > this.id) {
+      successor.emit('Competition', {electing: this.electing});
+    }
+
+  }
+
+  // Inicia Eleição
+  async startElection(id) {
+    let connectedSuccessor = await this.verifySuccessor();
+
+    if(connectedSuccessor) {
+      let successorId = getClientID(this.successorIp)
+      let successor = this.allNodes[successorId]
+      successor.emit('StartElection', {id: id});
+    }
+  }
+
+  // Processa Eleição 
+  async processElection(id) {
+
+    if(id > this.id) {
+      await this.startElection(id)
+    }
+    else if(id < this.id) {
+      await this.startElection(this.id)
+    }
+    else if(id == this.id) {
       this.coordinatorIp = this.localIp
       this.isCoordinator = true
-      this.io.emit('IamCoordinator', { isCoordinator: this.isCoordinator });
-      return this.coordinatorIp;
-    }
 
-    for (const [_, socket] of Object.entries(this.allNodes)) {
-      if(socket.connected) {
-        socket.emit('AreYouCoordinator', { mensagem: 'Você é o coordenador?' });
-
-        setTimeout(async() => {
-          if(this.coordinatorIp) {
-            return this.coordinatorIp;
-          }
-          else{
-            return await this.startElection()
-          }
-        }, 5000);
+      for (const [_, socket] of Object.entries(this.allNodes)) {
+        if(socket.connected) {
+          socket.emit('EndOfElection', { isCoordinator: this.isCoordinator });
+        }
       }
-    
-    }
-
-  }
-
-  // Inicia eleição
-  async startElection(decrement = 1) {
-    if(this.coordinatorIp) {
-      return this.coordinatorIp;
-    }
-
-    const ids = Object.values(this.allNodes);
-    const index = ids.length - decrement;
-  
-    if (index < 0) {
-      return this.coordinatorIp;
-    }
-  
-    const coordinator = ids[index];
-
-    if (coordinator && coordinator.connected) {
-
-      coordinator.emit('YouAreCoordinator', { mensagem: 'Você é o coordenador!' });
-      let coordinatorIp = getClientIp(coordinator);
-      this.coordinatorIp = coordinatorIp;
-      return coordinatorIp;
-    } else {
-
-      return this.startElection(decrement + 1);
     }
   }
 
+  // Exemplo de requisição ao Coordenador
   async requestExemple() {
 
     let coordinatorId = getClientID(this.coordinatorIp)
@@ -253,12 +288,12 @@ class DistributedNode {
         }
         else{
           console.log(`Requisição sem resposta!`);
-          await this.electCoordinator();
+          await this.announceElection();
         }
       }, 5000);
     }
     else{
-      await this.electCoordinator();
+      await this.startElection(this.id);
     }
     
   }
