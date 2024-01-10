@@ -5,6 +5,7 @@ const printEnvironmentVariables = require("./utils/PrintEnvironmentVariables");
 const ipsToObjectSorted = require("./utils/IpsToObjectSorted");
 const connecToNode = require("./utils/ConnecToNode");
 const getClientIp = require("./utils/GetClientIp");
+const getClientID = require("./utils/GetClientID");
 
 class DistributedNode {
   constructor() {
@@ -38,9 +39,7 @@ class DistributedNode {
     });
   
     this.ipList = ipsToObjectSorted(process.env.IP_LIST);
-
-    let parts = this.localIp.split('.');
-    this.id = parseInt(parts[parts.length - 1]);
+    this.id = getClientID(this.localIp)
     this.successorIp = this.ipList[this.id + 1];
 
     this.io.on("connection", (socket) => {
@@ -71,7 +70,7 @@ class DistributedNode {
 
     setTimeout(async() => {
       printEnvironmentVariables(this);
-    }, 20000);
+    }, 15000);
   }
   
   // Conecta com todos os nós
@@ -99,8 +98,13 @@ class DistributedNode {
 
   // Verifica conexão com nó sucessor
   async verifySuccessor() {
+
     if(this.successorIp) {
-      return this.successorIp;
+      let successorId = getClientID(this.successorIp)
+      let successor = this.allNodes[successorId]
+      if(successor && successor.connected) {
+        return
+      }
     }
 
     for (const [id, socket] of Object.entries(this.allNodes)) {
@@ -120,8 +124,13 @@ class DistributedNode {
 
   // Verifica conexão com nó coordenador
   async verifyCoordinator() {
+
     if(this.coordinatorIp) {
-      return this.coordinatorIp;
+      let coordinatorId = getClientID(this.coordinatorIp)
+      let coordinator = this.allNodes[coordinatorId]
+      if(coordinator && coordinator.connected) {
+        return
+      }
     }
 
     const ids = Object.keys(this.allNodes);
