@@ -1,21 +1,23 @@
-function ipsToObjectSorted(ipsString) {
-    let ipsArray = ipsString.split(',');
-    let ipsKeyValueArray = ipsArray.map(ip => {
-        let segments = ip.split('.');
-        let lastSegment = segments[segments.length - 1];
-        return { key: lastSegment, value: ip };
-    });
+function ipsToObjectSorted(ips) {
 
-    // Ordenando o array com base na chave
-    ipsKeyValueArray.sort((a, b) => parseInt(a.key) - parseInt(b.key));
+    let objeto;
 
-    // Convertendo de volta para um objeto
-    let sortedIpsObject = {};
-    ipsKeyValueArray.forEach(item => {
-        sortedIpsObject[item.key] = item.value;
-    });
+    if (typeof ips === 'string') {
 
-    return sortedIpsObject;
+        objeto = {};
+        ips.split(',').forEach(ip => {
+            const ultimoSegmento = ip.trim().split('.').pop();
+            objeto[parseInt(ultimoSegmento) + 3000] = ip.trim();
+        });
+        
+    } else if (typeof ips === 'object' && ips !== null) {
+        objeto = ips;
+    }
+
+    // Ordena o objeto pela chave
+    return Object.fromEntries(
+        Object.entries(objeto).sort((a, b) => parseInt(a[0]) - parseInt(b[0]))
+    );
 }
 
 module.exports = ipsToObjectSorted;
