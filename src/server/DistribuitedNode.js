@@ -74,16 +74,17 @@ class DistributedNode {
     
 
     // SIMULAÇÃO
+    await new Promise((resolve) => setTimeout(resolve, 5000));
     await this.startElection([]);
 
-    setTimeout(async() => {
-      if(this.isCoordinator) {
-        await this.setupCoordinatorServer();
-      }
-      else {
-        await this.setupRegularNodeServer();
-      }
-    }, 20000);
+    await new Promise((resolve) => setTimeout(resolve, 40000));
+    if(!this.isCoordinator) {
+      await this.setupRegularNodeServer();
+    }
+    else {
+      await this.setupCoordinatorServer();
+    }
+
 
     /*
     setTimeout(async() => {
@@ -225,18 +226,28 @@ class DistributedNode {
     }
   }
 
+  // Configurar servidor do coordenador
+  async setupCoordinatorServer() {
+    await this.connectToDatabase();
+
+    this.io.on("connection", (socket) => {
+      console.log("Nó conectado:", socket.id);
+
+      socket.on("log_request", (requestData) => {
+        console.log("Recebida solicitação de log:", requestData);
+        this.addToQueue(requestData, socket);
+      });
+    });
+  }
+
   // Exemplo de requisição ao Coordenador
   async setupRegularNodeServer() {
-
     let coordinatorPort = getClientPort(this.coordinatorIp);
     let coordinatorSocket = await connecToNode(`${this.coordinatorIp}:${coordinatorPort}`);
 
     if(coordinatorSocket && coordinatorSocket.connected) {
-      
-      this.coordinatorSocket.on("connect", () => {
-        console.log(`Conectado ao coordenador no endereço ${this.coordinatorIp}:${coordinatorPort}`);
-        this.initiateRandomRequests(coordinatorSocket);
-      });
+      console.log(`Conectado ao coordenador no endereço ${this.coordinatorIp}:${coordinatorPort}`);
+      await this.initiateRandomRequests(coordinatorSocket);
     }
   }
 
@@ -244,7 +255,7 @@ class DistributedNode {
   async connectToDatabase() {
     // Configuração do banco de dados
     const dbConfig = {
-      host: "172.25.0.2",
+      host: "172.25.0.6",
       port: 5432,
       user: "user",
       password: "password",
@@ -275,20 +286,6 @@ class DistributedNode {
           console.error("Erro ao desconectar do banco de dados:", error)
         );
     }
-  }
-
-  // Configurar servidor do coordenador
-  async setupCoordinatorServer() {
-    await this.connectToDatabase();
-
-    this.io.on("connection", (socket) => {
-      console.log("Nó conectado:", socket.id);
-
-      socket.on("log_request", (requestData) => {
-        console.log("Recebida solicitação de log:", requestData);
-        this.addToQueue(requestData, socket);
-      });
-    });
   }
 
   // Inicia um ciclo de solicitações aleatórias ao coordenador
