@@ -3,8 +3,6 @@ const socketIo = require("socket.io");
 const socketClient = require("socket.io-client");
 const { Pool } = require("pg");
 
-const ipsToObjectSorted = require("./utils/IpsToObjectSorted");
-
 const MIN_INTERVAL = 5000; // 5 segundos
 const MAX_INTERVAL = 15000; // 15 segundos
 const TIMEOUT_LIMIT = 7000; // 7 segundos para timeout
@@ -14,27 +12,38 @@ class DistributedNode {
     // Variáveis de ambiente específicas de cada nó
     this.hostname = process.env.HOSTNAME;
     this.localIp = process.env.IP_LOCAL;
-    this.port = parseInt(process.env.NODE_PORT) || 3000;
+    this.port = parseInt(process.env.NODE_PORT);
+    const ipListString = process.env.IP_LIST;
 
-    this.id = null;
+    if (ipListString) {
+      this.ipList = ipListString.split(",").map((ip) => ip.trim());
+    } else {
+      console.error("IP_LIST não definido ou inválido");
+      this.ipList = [];
+    }
+
+    // Mapeamento de IP para Porta
+    this.ipToPortMap = {
+      "172.25.0.3": 3000,
+      "172.25.0.4": 3001,
+      "172.25.0.5": 3002,
+      "172.25.0.6": 3003,
+      // Adicione os mapeamentos para todos os IPs e portas relevantes
+    };
+
+    console.log("IP_LIST:", this.ipList);
+
     this.io = null;
     this.server = null;
-    this.ipList = null;
-    this.successorIp = null;
+    this.client = null;
 
-    // Processar IP_LIST para extrair os IDs
-    this.ipList = process.env.IP_LIST.split(",").map((ip) => ip.trim());
-    this.id = parseInt(this.localIp.split(".").pop());
-
-    // Determinar o coordenador baseado no maior ID
-    this.coordinatorId = Math.max(
-      ...this.ipList.map((ip) => parseInt(ip.split(".").pop()))
-    );
-    this.isCoordinator = this.id === this.coordinatorId;
+    this.isCoordinator = false; // Flag para indicar se este nó é o coordenador
 
     this.requestQueue = []; // Fila de requisições
     this.queueLimit = 10; // Limite máximo da fila
     this.isProcessing = false; // Flag para indicar se uma requisição está sendo processada
+
+    this.isInElection = false; // Flag para indicar se uma eleição está em andamento
   }
 
   initServer() {
@@ -51,21 +60,6 @@ class DistributedNode {
       console.log(`Node server running on port ${this.port}`);
     });
 
-    this.ipList = ipsToObjectSorted(process.env.IP_LIST);
-
-    let parts = this.localIp.split(".");
-    this.id = parseInt(parts[parts.length - 1]);
-    this.successorIp = this.ipList[this.id + 1];
-
-    // console.log(`Variáveis de ambiente:`);
-    // console.log(`Hostname: ${this.hostname}`);
-    // console.log(`IP Local: ${this.localIp}`);
-    // console.log(`Porta: ${this.port}`);
-    // console.log(`ID: ${this.id}`);
-    // console.log(`IP sucessor: ${this.successorIp}`);
-    // console.log("Lista de IPs:");
-    // console.table(this.ipList);
-
     this.io.on("connection", (socket) => {
       let clientIp = socket.request.connection.remoteAddress;
       if (clientIp.substr(0, 7) === "::ffff:") {
@@ -73,20 +67,17 @@ class DistributedNode {
       }
       console.log(`IP ${clientIp} estabeleceu conexão!`);
       socket.emit("conexaoConfirmada", { mensagem: "Conexão bem-sucedida!" });
+      socket.on("disconnect", () => {
+        console.log(`IP ${clientIp} desconectou.`);
+      });
 
-      // Tratar eventos específicos aqui
-      socket.on("event_name", (data) => {
-        // Lógica de manipulação do evento
+      // Configurar ouvintes para eventos relacionados à eleição
+      socket.on("election_message", (message) => {
+        this.onElectionMessageReceived(message);
       });
     });
-
-    if (this.isCoordinator) {
-      console.log(`SOU O COORDENADOR INICIAL: ${this.coordinatorId}`);
-      this.setupCoordinatorServer();
-    } else {
-      this.setupRegularNodeServer();
-      console.log("Não é o coordenador");
-    }
+    // Iniciar eleição assim que o servidor estiver ativo
+    this.startElection();
   }
 
   // Conectar ao banco de dados
@@ -119,25 +110,26 @@ class DistributedNode {
     this.io.on("connection", (socket) => {
       console.log("Nó conectado:", socket.id);
 
-      socket.on("simple_request", (data) => {
-        console.log("Recebida solicitação simples:", data);
-        socket.emit("simple_response", { message: "Hello from coordinator" });
-      });
+      // socket.on("simple_request", (data) => {
+      //   console.log("Recebida solicitação simples:", data);
+      //   socket.emit("simple_response", { message: "Hello from coordinator" });
+      // });
 
       socket.on("log_request", (requestData) => {
         console.log("Recebida solicitação de log:", requestData);
         this.addToQueue(requestData, socket);
       });
+
+      // Adiciona tratamento para quando o coordenador atual for substituído
+      socket.on("new_coordinator", (newCoordinatorPort) => {
+        if (newCoordinatorPort !== this.port) {
+          console.log(`Novo coordenador eleito: ${newCoordinatorPort}`);
+          this.becomeRegularNode(newCoordinatorPort);
+        }
+      });
     });
-
-    // this.io.on("log_request", (data) => {
-    //   console.log("Recebida solicitação de log:", data);
-    //   this.processRequest(data);
-    // });
-
-    // // Iniciar o processamento da fila
-    // this.initQueueProcessing();
   }
+
   // Adiciona uma requisição à fila
   addToQueue(requestData, socket) {
     if (this.requestQueue.length < this.queueLimit) {
@@ -145,9 +137,8 @@ class DistributedNode {
       console.log("Requisição adicionada à fila:", requestData);
     } else {
       // Opção de tratamento quando a fila está cheia
-      console.log("Fila cheia. Requisição descartada:", requestData);
+      console.log("Tamanho máximo da fila atingido. ");
     }
-
     if (!this.isProcessing) {
       this.processNextInQueue();
     }
@@ -163,79 +154,70 @@ class DistributedNode {
       this.isProcessing = false;
     }
   }
-  
-// Processa uma requisição específica
-processRequest(request, socket) {
-  console.log("Processando requisição:", request);
 
-  const queryText = "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
-  const values = [request.hostname, new Date(request.timestamp)];
+  // Processa uma requisição específica
+  processRequest(request, socket) {
+    console.log("Processando requisição:", request);
 
-  this.dbPool.query(queryText, values, (err, res) => {
-    if (err) {
-      console.error("Erro ao gravar no banco de dados:", err.stack);
-      // Envia a resposta através do socket especificado
-      socket.emit(`log_response-${request.requestId}`, {
-        status: "Failure",
-        error: err.message,
-      });
-    } else {
-      console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
-      // Envia a resposta através do socket especificado
-      socket.emit(`log_response-${request.requestId}`, {
+    const queryText =
+      "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
+    const values = [request.hostname, new Date(request.timestamp)];
+
+    this.dbPool.query(queryText, values, (err, res) => {
+      if (err) {
+        console.error("Erro ao gravar no banco de dados:", err.stack);
+        // Envia a resposta através do socket especificado
+        socket.emit(`log_response-${request.requestId}`, {
+          status: "Failure",
+          error: err.message,
+        });
+      } else {
+        console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
+        // Envia a resposta através do socket especificado
+        socket.emit(`log_response-${request.requestId}`, {
           status: "Success",
           data: res.rows[0],
-      });
-    }
-
-    // Após processar, processar a próxima requisição na fila
-    setTimeout(() => {
-      this.isProcessing = false;
-      this.processNextInQueue();
-    }, 1000); // Delay para simular o processamento e garantir exclusão mútua
-  });
-}
-
-
-  // Conecta ao nó sucessor
-  connectToSuccessor() {
-    // Estabelece conexão com nó sucessor
-    let client = socketClient(`http://${this.successorIp}:3000`);
-
-    setTimeout(() => {
-      if (client.on().connected) {
-        console.log(`Conectado ao sucessor ${this.successorIp}`);
-      } else {
-        var ids = Object.keys(this.ipList);
-
-        for (const id of ids) {
-          if (parseInt(id) > this.id) {
-            let client = socketClient(`http://${this.ipList[id]}:3000`);
-
-            setTimeout(() => {
-              if (client.on().connected) {
-                this.successorIp = this.ipList[id];
-                console.log(`Conectado ao sucessor ${this.successorIp}`);
-                return;
-              }
-            }, 3000);
-          }
-        }
-
-        let client = socketClient(`http://${this.ipList[ids[0]]}:3000`);
-
-        setTimeout(() => {
-          if (client.on().connected) {
-            this.successorIp = this.ipList[ids[0]];
-            console.log(`Conectado ao sucessor ${this.successorIp}`);
-            return;
-          }
-          console.log(`Erro ao conectar-se a ${this.successorIp}`);
-          this.successorIp = null;
-          return;
-        }, 3000);
+        });
       }
-    }, 3000);
+
+      // Após processar, processar a próxima requisição na fila
+      setTimeout(() => {
+        this.isProcessing = false;
+        this.processNextInQueue();
+      }, 5000); // Delay para simular o processamento e garantir exclusão mútua
+    });
+  }
+
+  // Transforma o coordenador atual em um nó regular
+  becomeRegularNode(newCoordinatorPort) {
+    console.log(`Transformando o nó atual em um nó regular.`);
+    this.isCoordinator = false;
+    this.coordinatorPort = newCoordinatorPort;
+
+    // Desconectar de quaisquer serviços específicos do coordenador,
+    // como banco de dados ou outros recursos.
+    this.disconnectFromDatabase(); // Exemplo, substituir pela sua lógica real
+
+    // Remover os ouvintes de eventos de socket que são específicos do coordenador
+    this.io.removeAllListeners("connection");
+
+    // Reconectar ao novo coordenador
+    this.setupRegularNodeServer();
+  }
+
+  // Desconectar do banco de dados
+  disconnectFromDatabase() {
+    // Verifica se a pool de conexões existe e está conectada
+    if (this.dbPool) {
+      this.dbPool
+        .end()
+        .then(() =>
+          console.log("Desconectado do banco de dados PostgreSQL com sucesso.")
+        )
+        .catch((error) =>
+          console.error("Erro ao desconectar do banco de dados:", error)
+        );
+    }
   }
 
   // Configura o servidor em um nó regular
@@ -245,11 +227,6 @@ processRequest(request, socket) {
     // Estabelece conexão com o servidor do coordenador
     this.connectToCoordinator();
 
-    // Configuração adicional necessária para um nó regular
-    // Por exemplo, pode ser necessário configurar ouvintes de eventos,
-    // agendar tarefas periódicas, etc.
-    this.setupRegularNodeTasks();
-
     // Configurar ouvintes para eventos relacionados à eleição
     this.io.on("coordinator_changed", (newCoordinatorId) => {
       this.updateCoordinator(newCoordinatorId);
@@ -257,41 +234,41 @@ processRequest(request, socket) {
   }
 
   // Estabelece conexão com o coordenador
-connectToCoordinator() {
-  const coordinatorUrl = `http://${this.ipList[this.coordinatorId]}:3000`;
-  this.coordinatorClient = socketClient(coordinatorUrl);
+  connectToCoordinator() {
+    const coordinatorUrl = `http://${this.ipList[this.coordinatorPort]}:3000`;
+    this.coordinatorClient = socketClient(coordinatorUrl);
 
-  this.coordinatorClient.on("connect", () => {
-    console.log(`Conectado ao coordenador no endereço ${coordinatorUrl}`);
-    // Inicia o ciclo de solicitações aleatórias ao coordenador
-    this.initiateRandomRequests();
-  });
+    this.coordinatorClient.on("connect", () => {
+      console.log(`Conectado ao coordenador no endereço ${coordinatorUrl}`);
+      this.initiateRandomRequests();
+    });
 
-  this.coordinatorClient.on("simple_response", (data) => {
-    console.log("Resposta recebida do coordenador:", data.message);
-    // Manter a conexão aberta para comunicação contínua
-  });
+    this.coordinatorClient.on("coordinator_message", (data) => {
+      console.log(
+        "Mensagem de novo coordenador recebida:",
+        data.newCoordinatorId
+      );
+      this.updateCoordinator(data.newCoordinatorId);
+    });
 
-  this.coordinatorClient.on("disconnect", () => {
-    console.log("Desconectado do coordenador.");
-    // Reconectar ou tratar a desconexão conforme necessário
-  });
+    this.coordinatorClient.on("disconnect", () => {
+      console.log("Desconectado do coordenador.");
+      // Implemente lógica de reconexão ou tratamento conforme necessário
+    });
+  }
 
-  // Tratar outros eventos ou enviar mensagens conforme necessário
-}
+  // Atualiza as informações do coordenador
+  updateCoordinator(newCoordinatorPort) {
+    if (newCoordinatorPort !== this.coordinatorPort) {
+      this.coordinatorPort = newCoordinatorPort;
+      console.log(`Novo coordenador eleito: ${newCoordinatorPort}`);
 
-  // Atualiza as informações do coordenador e reconecta
-  updateCoordinator(newCoordinatorId) {
-    if (newCoordinatorId !== this.coordinatorId) {
-      this.coordinatorId = newCoordinatorId;
-      console.log(`Novo coordenador eleito: ${newCoordinatorId}`);
-
-      // Desconectar do coordenador antigo, se necessário
+      // Desconectar do coordenador atual se estiver conectado
       if (this.coordinatorClient && this.coordinatorClient.connected) {
         this.coordinatorClient.disconnect();
       }
 
-      // Estabelecer nova conexão com o coordenador
+      // Reconectar ao novo coordenador
       this.connectToCoordinator();
     }
   }
@@ -300,10 +277,10 @@ connectToCoordinator() {
   initiateRandomRequests() {
     const sendRequest = () => {
       const requestData = {
-        type: "log_request", // Tipo de solicitação
+        type: "log_request",
         hostname: this.hostname,
         timestamp: Date.now(),
-        requestId: `req-${Date.now()}-${Math.random()}`, // Identificador único
+        requestId: `req-${Date.now()}-${Math.random()}`,
       };
 
       const timeout = setTimeout(() => {
@@ -311,6 +288,12 @@ connectToCoordinator() {
           `Tempo de resposta excedido para ${requestData.requestId}.`
         );
         this.coordinatorClient.off(`log_response-${requestData.requestId}`);
+
+        // Desconectar do coordenador
+        this.coordinatorClient.disconnect();
+
+        // Iniciar o processo de eleição
+        this.startElection();
       }, TIMEOUT_LIMIT);
 
       this.coordinatorClient.once(
@@ -331,91 +314,177 @@ connectToCoordinator() {
     }, MIN_INTERVAL);
   }
 
-  // Configura tarefas específicas para um nó regular
-  setupRegularNodeTasks() {
-    // Aqui você pode configurar tarefas que os nós regulares precisam executar
-    // Por exemplo, enviar dados periodicamente para o coordenador,
-    // ou realizar tarefas internas
-  }
-
-  connectToOtherNodes() {
-    this.ipList.forEach((ip) => {
-      const client = socketClient(`http://${ip}:`, {
-        // Opções adicionais, se necessário
-      });
-
-      client.on("connect", () => {
-        console.log(`Connected to node at ${ip}`);
-        // Enviar informações ou sincronizar estado, se necessário
-      });
-
-      // Tratar eventos específicos aqui
-      client.on("event_name", (data) => {
-        // Lógica de manipulação do evento
-      });
-
-      this.clients.set(ip, client);
-    });
-  }
-
-  // Inicia a eleição
+  // Inicia o processo de Eleição
   startElection() {
-    const message = {
-      type: "ELECTION",
-      processIds: [this.processId],
-    };
-    this.sendMessageToSuccessor(message);
-  }
-
-  // Envia uma mensagem para o nó sucessor
-  sendMessageToSuccessor(message) {
-    const successorClient = this.clients.get(this.successorIp);
-    if (successorClient && successorClient.connected) {
-      successorClient.emit("message", message);
-    } else {
-      console.log("Erro: Não conectado ao nó sucessor.");
+    if (this.isInElection) {
+      console.log("Uma eleição já está em andamento.");
+      return;
     }
+
+    console.log("Iniciando uma nova eleição.");
+    this.isInElection = true;
+
+    const electionMessage = {
+      type: "ELECTION",
+      originPort: this.port,
+      ports: [this.port],
+    };
+
+    // Enviar a mensagem de eleição para o próximo nó no anel
+    this.sendElectionMessageToSuccessor(electionMessage);
   }
 
-  // Lida com a recepção de uma mensagem de eleição
   onElectionMessageReceived(message) {
     if (message.type === "ELECTION") {
-      if (message.processIds.includes(this.processId)) {
-        // A mensagem retornou ao iniciador
-        const maxProcessId = Math.max(...message.processIds);
-        this.announceCoordinator(maxProcessId);
+      // Adicionar o número do próprio nó à lista na mensagem
+      if (!message.ports.includes(this.port)) {
+        message.ports.push(this.port);
+      }
+
+      // Verificar se a mensagem retornou ao nó que iniciou a eleição
+      if (message.originPort === this.port) {
+        // Eleição concluída, determinar o coordenador
+        const highestPort = Math.max(...message.ports);
+        this.coordinatorPort = highestPort;
+        this.isCoordinator = this.port === highestPort;
+
+        if (this.isCoordinator) {
+          this.becomeCoordinator();
+        } else {
+          this.setupRegularNodeServer();
+        }
       } else {
-        // Adiciona o próprio process_id e passa a mensagem adiante
-        message.processIds.push(this.processId);
-        this.sendMessageToSuccessor(message);
+        // Passar a mensagem para o sucessor
+        this.sendElectionMessageToSuccessor(message);
       }
     }
   }
 
-  // Anuncia o coordenador
-  announceCoordinator(coordinatorId) {
+  sendElectionMessageToSuccessor(electionMessage) {
+    if (!Array.isArray(this.ipList) || this.ipList.length === 0) {
+      console.error("this.ipList não está definido ou é vazio");
+      return;
+    }
+
+    const successorIndex = this.ipList.indexOf(this.localIp) + 1;
+    const successorIp = this.ipList[successorIndex % this.ipList.length];
+    const successorPort = this.ipToPortMap[successorIp];
+
+    // Função para lidar com sucesso no envio da mensagem
+    const onSuccess = () => {
+      console.log(
+        `Mensagem enviada com sucesso para ${successorIp}:${successorPort}`
+      );
+    };
+
+    // Função para lidar com falha no envio da mensagem
+    const onFail = () => {
+      const nextSuccessorIndex = (successorIndex + 1) % this.ipList.length;
+      const nextSuccessorIp = this.ipList[nextSuccessorIndex];
+      const nextSuccessorPort = this.ipToPortMap[nextSuccessorIp];
+
+      if (nextSuccessorIp === this.localIp) {
+        console.error(
+          "Falha ao enviar mensagem para ambos os sucessores. Enviando de volta ao originador."
+        );
+        if (electionMessage.originPort !== this.port) {
+          const originatorPort = this.ipToPortMap[this.localIp]; // Assumindo que this.localIp é o IP do originador
+          this.trySendMessage(
+            this.localIp,
+            originatorPort,
+            electionMessage,
+            onSuccess,
+            () => {
+              console.error(
+                "Falha ao enviar mensagem de volta para o originador."
+              );
+            }
+          );
+        }
+      } else {
+        this.trySendMessage(
+          nextSuccessorIp,
+          nextSuccessorPort,
+          electionMessage,
+          onSuccess,
+          () => {
+            console.error("Falha ao enviar mensagem para ambos os sucessores.");
+          }
+        );
+      }
+    };
+
+    this.trySendMessage(
+      successorIp,
+      successorPort,
+      electionMessage,
+      onSuccess,
+      onFail
+    );
+  }
+
+  trySendMessage(ip, port, message, onSuccess, onFailure) {
+    const socketUrl = `http://${ip}:${port}`;
+    const client = socketClient(socketUrl);
+
+    client.on("connect", () => {
+      console.log(`Conectado com sucesso ao IP: ${ip} na porta: ${port}`);
+      client.emit("election_message", message);
+
+      // Aguardar confirmação de recebimento
+      client.once("acknowledgement", () => {
+        console.log(`Mensagem confirmada por ${ip}:${port}`);
+        onSuccess(); // Chamar o callback de sucesso
+        client.disconnect();
+      });
+    });
+
+    client.on("connect_error", () => {
+      console.error(`Falha ao conectar ao IP: ${ip} na porta: ${port}`);
+      if (typeof onFailure === "function") {
+        onFailure();
+      }
+      client.disconnect();
+    });
+
+    // Semelhantemente para o timeout:
+    setTimeout(() => {
+      if (!client.connected) {
+        console.error(
+          `Timeout ao tentar conectar ao IP: ${ip} na porta: ${port}`
+        );
+        if (typeof onFailure === "function") {
+          onFailure();
+        }
+        client.disconnect();
+      }
+    }, 5000);
+  }
+
+  // Método chamado quando o nó se torna o coordenador
+  becomeCoordinator() {
+    console.log(`Este nó (${this.port}) é agora o coordenador.`);
+    this.isCoordinator = true;
+    this.coordinatorPort = this.port;
+
+    this.setupCoordinatorServer();
+    this.broadcastNewCoordinator();
+  }
+
+  // Envia uma mensagem para todos os outros nós para informá-los sobre o novo coordenador
+  broadcastNewCoordinator() {
     const coordinatorMessage = {
       type: "COORDINATOR",
-      coordinatorId: coordinatorId,
-      localIp: process.env.IP_LOCAL,
+      newCoordinatorPort: this.port,
     };
-    this.broadcastMessage(coordinatorMessage);
-  }
 
-  // Envia uma mensagem para todos os nós conectados
-  broadcastMessage(message) {
-    this.clients.forEach((client) => {
-      if (client.connected) {
-        client.emit("message", message);
+    this.ipList.forEach((ip) => {
+      if (ip !== this.localIp) {
+        this.trySendMessage(ip, coordinatorMessage, () => {
+          console.error(`Falha ao enviar mensagem de coordenador para ${ip}`);
+        });
       }
     });
-  }
-
-  // Lida com a recepção de uma mensagem de coordenador
-  onCoordinatorMessageReceived(message) {
-    if (message.type === "COORDINATOR") {
-      console.log(`New coordinator: ${message.coordinatorId}`);
-    }
   }
 }
 

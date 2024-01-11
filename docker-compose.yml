@@ -27,13 +27,10 @@ services:
       dockerfile: Dockerfile
     container_name: ubuntu-node-1
     environment:
-      HOSTID: 1
       HOSTNAME: ubuntu-node-1
-      PROCESS_ID: 1
       IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      LIST_PORTS: 3001,3002,3003
-      SUCCESSOR_IP: 172.25.0.4
       IP_LOCAL: 172.25.0.3
+      NODE_PORT: 3000
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,7 +40,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.3
     ports:
-      - "3001:3001"
+      - "3000:3000"
 
   ubuntu-node-2:
     build:
@@ -51,13 +48,10 @@ services:
       dockerfile: Dockerfile
     container_name: ubuntu-node-2
     environment:
-      HOSTID: 2
       HOSTNAME: ubuntu-node-2
-      PROCESS_ID: 2
       IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.4
       IP_LOCAL: 172.25.0.4
-      LIST_PORTS: 3000,3002,3003
+      NODE_PORT: 3001
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,7 +61,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.4
     ports:
-      - "3002:3002"
+      - "3001:3001"
 
   ubuntu-node-3:
     build:
@@ -75,13 +69,10 @@ services:
       dockerfile: Dockerfile
     container_name: ubuntu-node-3
     environment:
-      HOSTID: 3
       HOSTNAME: ubuntu-node-3
-      PROCESS_ID: 3
       IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.6
       IP_LOCAL: 172.25.0.5
-      LIST_PORTS: 3000,3001,3003
+      NODE_PORT: 3002
     depends_on:
       postgres:
         condition: service_healthy
@@ -91,7 +82,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.5
     ports:
-      - "3003:3003"
+      - "3002:3002"
 
   ubuntu-node-4:
     build:
@@ -100,12 +91,9 @@ services:
     container_name: ubuntu-node-4
     environment:
       HOSTID: 4
-      HOSTNAME: ubuntu-node-4
-      PROCESS_ID: 4
       IP_LIST: "172.25.0.3,172.25.0.4,172.25.0.5,172.25.0.6"
-      SUCCESSOR_IP: 172.25.0.3
       IP_LOCAL: 172.25.0.6
-      LIST_PORTS: 3000,3001,3002
+      NODE_PORT: 3003
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,7 +103,7 @@ services:
       app_network:
         ipv4_address: 172.25.0.6
     ports:
-      - "3004:3004"
+      - "3003:3003"
 
   dbadmin:
     image: dpage/pgadmin4

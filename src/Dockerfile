@@ -27,7 +27,7 @@ RUN npm install
 COPY server ./server
 
 # Exponha as portas para a API, consumidores, eleição e SSH
-EXPOSE 3000 4000 22
+EXPOSE 3000 3001 22 3002 3003
 
 # Iniciar o serviço OpenSSH
 RUN service ssh start
