@@ -8,9 +8,9 @@ const connecToNode = require("./utils/ConnecToNode");
 const getClientIp = require("./utils/GetClientIp");
 const getClientPort = require("./utils/GetClientPort");
 
-const MIN_INTERVAL = 5000; // 5 segundos
-const MAX_INTERVAL = 15000; // 15 segundos
-const TIMEOUT_LIMIT = 7000; // 7 segundos para timeout
+const MIN_INTERVAL = 15000; // 15 segundos
+const MAX_INTERVAL = 25000; // 25 segundos
+const TIMEOUT_LIMIT = 10000; // 10 segundos para timeout
 
 class DistributedNode {
   constructor() {
@@ -28,9 +28,11 @@ class DistributedNode {
 
     this.InElection = false;
     this.requestSent = false;
+    this.inElection = false;
+    this.electionList = [];
 
     this.requestQueue = []; // Fila de requisições
-    this.queueLimit = 10; // Limite máximo da fila
+    this.queueLimit = 6; // Limite máximo da fila
     this.isProcessing = false; // Flag para indicar se uma requisição está sendo processada
   }
 
@@ -54,6 +56,7 @@ class DistributedNode {
 
       // Evento - Ouvir iniciar eleição
       socket.on("ELEICAO", async(data) => {
+        this.inElection = true;
         await this.startElection(data);
       });
 
@@ -61,59 +64,22 @@ class DistributedNode {
       socket.on("COORDENADOR", async (data) => {
 
         this.coordinatorIp = data.coordinator;
+        this.inElection = false;
+        this.electionList = [];
         if(this.coordinatorIp == this.localIp) {
           this.isCoordinator = true;
         }
         else {
           this.isCoordinator = false;
+          await this.setupRegularNodeServer();
         }
         
         printEnvironmentVariables(this);
       });
     });
     
-
-    // SIMULAÇÃO
     await new Promise((resolve) => setTimeout(resolve, 5000));
     await this.startElection([]);
-
-    await new Promise((resolve) => setTimeout(resolve, 40000));
-    if(!this.isCoordinator) {
-      await this.setupRegularNodeServer();
-    }
-    else {
-      await this.setupCoordinatorServer();
-    }
-
-
-    /*
-    setTimeout(async() => {
-      if(this.isCoordinator) {
-        console.log("Teste Desconexão")
-        this.isCoordinator = false;
-        this.coordinatorIp = 'Disconnect';
-        this.successorIp = 'Disconnect';
-      }
-      if(this.coordinatorIp !== 'Disconnect' && !this.isCoordinator){
-        await this.requestExemple();
-      }
-    }, 20000);
-
-    setTimeout(async() => {
-      if(this.coordinatorIp == 'Disconnect') {
-        console.log("Teste Conexão")
-        await this.startElection([]);
-        printEnvironmentVariables(this);
-      }
-    }, 50000);
-
-    setTimeout(async() => {
-      if(!this.isCoordinator) {
-        await this.requestExemple();
-      }
-    }, 80000);
-
-    */
 
   }
 
@@ -146,7 +112,7 @@ class DistributedNode {
       return clientSocket
     }
 
-    return null;
+    return await this.electSuccessor();
   }
 
   // Disconecta do nó Coordenador
@@ -168,26 +134,27 @@ class DistributedNode {
   // Inicia Eleição
   async startElection(electionList) {
 
-    if( !electionList.includes(this.port) && ( electionList.length === 0 || electionList[0] > this.port ) ) {
-
-      for(const clientPort of electionList) {
-        if (!this.ipList.hasOwnProperty(clientPort)) {
-          
-          let lastPart = clientPort % 3000;
-          const clientIp = `172.25.0.${lastPart}`;
-          
-          this.ipList = {
-            ...this.ipList,
-            [clientPort]: clientIp
-          }
-  
-          this.ipList = ipsToObjectSorted(this.ipList);
+    for(const clientPort of electionList) {
+      if (!this.ipList.hasOwnProperty(clientPort)) {
+        
+        let lastPart = clientPort % 3000;
+        const clientIp = `172.25.0.${lastPart}`;
+        
+        this.ipList = {
+          ...this.ipList,
+          [clientPort]: clientIp
         }
+
+        this.ipList = ipsToObjectSorted(this.ipList);
       }
+    }
+
+    if( !electionList.includes(this.port) && ( electionList.length === 0 || electionList[0] > this.port ) ) {
 
       const successorSocket = await this.electSuccessor();
 
       electionList.push(this.port);
+      this.electionList = electionList;
       console.log(`Lista de Processos da Eleição: [${electionList}]`);
 
       if(successorSocket) {
@@ -202,8 +169,11 @@ class DistributedNode {
       const coordinatorIp = this.ipList[coordinatorPort];
 
       this.coordinatorIp = coordinatorIp;
+      this.inElection = false;
+      this.electionList = [];
       if(this.coordinatorIp == this.localIp) {
         this.isCoordinator = true;
+        await this.setupCoordinatorServer();
       }
       printEnvironmentVariables(this);
 
@@ -231,23 +201,37 @@ class DistributedNode {
     await this.connectToDatabase();
 
     this.io.on("connection", (socket) => {
-      console.log("Nó conectado:", socket.id);
+      if(this.isCoordinator && !this.InElection) {
+        console.log("Nó conectado:", getClientIp(socket));
 
-      socket.on("log_request", (requestData) => {
-        console.log("Recebida solicitação de log:", requestData);
-        this.addToQueue(requestData, socket);
-      });
+        socket.on("log_request", (requestData) => {
+          console.log("Recebida solicitação de log:", requestData);
+          this.addToQueue(requestData, socket);
+        });
+  
+        socket.on("Disconnect", async () => {
+          //await this.disconnectFromDatabase();
+          this.isCoordinator = false;
+          this.requestQueue = [];
+          await new Promise((resolve) => setTimeout(resolve, 80000));
+          await this.removeCoordinator();
+          await this.startElection([]);
+        });
+      }
     });
   }
 
   // Exemplo de requisição ao Coordenador
   async setupRegularNodeServer() {
-    let coordinatorPort = getClientPort(this.coordinatorIp);
-    let coordinatorSocket = await connecToNode(`${this.coordinatorIp}:${coordinatorPort}`);
+    if(!this.isCoordinator && !this.InElection) {
+      await new Promise((resolve) => setTimeout(resolve, 10000));
+      let coordinatorPort = getClientPort(this.coordinatorIp);
+      let coordinatorSocket = await connecToNode(`${this.coordinatorIp}:${coordinatorPort}`);
 
-    if(coordinatorSocket && coordinatorSocket.connected) {
-      console.log(`Conectado ao coordenador no endereço ${this.coordinatorIp}:${coordinatorPort}`);
-      await this.initiateRandomRequests(coordinatorSocket);
+      if(coordinatorSocket && coordinatorSocket.connected) {
+        console.log(`Conectado ao coordenador no endereço ${this.coordinatorIp}:${coordinatorPort}`);
+        await this.initiateRandomRequests(coordinatorSocket);
+      }
     }
   }
 
@@ -290,101 +274,109 @@ class DistributedNode {
 
   // Inicia um ciclo de solicitações aleatórias ao coordenador
   async initiateRandomRequests(coordinatorSocket) {
+
     const sendRequest = () => {
-      const requestData = {
-        type: "log_request",
-        hostname: this.hostname,
-        timestamp: Date.now(),
-        requestId: `req-${Date.now()}-${Math.random()}`,
-      };
+      if(!this.inElection && !this.isCoordinator) {
+        const requestData = {
+          type: "log_request",
+          hostname: this.hostname,
+          timestamp: Date.now(),
+          requestId: `req-${Date.now()}-${Math.random()}`,
+        };
 
-      const timeout = setTimeout(async () => {
-        console.log(
-          `Tempo de resposta excedido para ${requestData.requestId}.`
-        );
-        coordinatorSocket.off(`log_response-${requestData.requestId}`);
-
-        // Desconectar do coordenador
-        await this.removeCoordinator();
-
-        // Iniciar o processo de eleição
-        await this.startElection([]);
-      }, TIMEOUT_LIMIT);
-
-      coordinatorSocket.once(
-        `log_response-${requestData.requestId}`,
-        (response) => {
-          clearTimeout(timeout);
-          console.log("Resposta recebida do coordenador:", response);
+        const timeout = setTimeout(async () => {
+          console.log(
+            `Tempo de resposta excedido para ${requestData.requestId}.`
+          );
           coordinatorSocket.off(`log_response-${requestData.requestId}`);
-        }
-      );
 
-      coordinatorSocket.emit("log_request", requestData);
+          this.inElection = true;
+          clearTimeout(timeout);
+        }, TIMEOUT_LIMIT);
+
+      
+        coordinatorSocket.once(
+          `log_response-${requestData.requestId}`,
+          (response) => {
+            clearTimeout(timeout);
+            console.log("Resposta recebida do coordenador:", response);
+            coordinatorSocket.off(`log_response-${requestData.requestId}`);
+          }
+        );
+  
+        coordinatorSocket.emit("log_request", requestData);
+      }
     };
 
-    setInterval(() => {
+    let engine = setInterval(async () => {
       const randomDelay = Math.random() * MAX_INTERVAL;
       setTimeout(sendRequest, randomDelay);
+
+      if(this.inElection && this.electionList.length == 0) {
+        clearInterval(engine);
+        coordinatorSocket.emit("Disconnect");
+        await this.removeCoordinator();
+        await this.startElection([]);
+      }
     }, MIN_INTERVAL);
   }
 
   // Adiciona na fila
   addToQueue(requestData, socket) {
-    if (this.requestQueue.length < this.queueLimit) {
-      this.requestQueue.push({ requestData, socket });
-      console.log("Requisição adicionada à fila:", requestData);
-    } else {
-      // Opção de tratamento quando a fila está cheia
-      console.log("Tamanho máximo da fila atingido. ");
-    }
-    if (!this.isProcessing) {
-      this.processNextInQueue();
+      if (this.requestQueue.length < this.queueLimit) {
+        this.requestQueue.push({ requestData, socket });
+        console.log("Requisição adicionada à fila:", requestData);
+      } else {
+        // Opção de tratamento quando a fila está cheia
+        console.log("Tamanho máximo da fila atingido. ");
+      }
+      if (!this.isProcessing) {
+        this.processNextInQueue();
     }
   }
 
   // Processa o próximo item na fila
   processNextInQueue() {
-    if (this.requestQueue.length > 0) {
-      this.isProcessing = true;
-      const { requestData, socket } = this.requestQueue.shift();
-      this.processRequest(requestData, socket);
-    } else {
-      this.isProcessing = false;
+      if (this.requestQueue.length > 0) {
+        this.isProcessing = true;
+        const { requestData, socket } = this.requestQueue.shift();
+        this.processRequest(requestData, socket);
+      } else {
+        this.isProcessing = false;
     }
   }
 
   // Processa uma requisição específica
   processRequest(request, socket) {
-    console.log("Processando requisição:", request);
+      console.log("Processando requisição:", request);
 
-    const queryText =
-      "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
-    const values = [request.hostname, new Date(request.timestamp)];
+      const queryText =
+        "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
+      const values = [request.hostname, new Date(request.timestamp)];
 
-    this.dbPool.query(queryText, values, (err, res) => {
-      if (err) {
-        console.error("Erro ao gravar no banco de dados:", err.stack);
-        // Envia a resposta através do socket especificado
-        socket.emit(`log_response-${request.requestId}`, {
-          status: "Failure",
-          error: err.message,
-        });
-      } else {
-        console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
-        // Envia a resposta através do socket especificado
-        socket.emit(`log_response-${request.requestId}`, {
-          status: "Success",
-          data: res.rows[0],
-        });
-      }
+      this.dbPool.query(queryText, values, (err, res) => {
+        if (err) {
+          console.error("Erro ao gravar no banco de dados:", err.stack);
+          // Envia a resposta através do socket especificado
+          socket.emit(`log_response-${request.requestId}`, {
+            status: "Failure",
+            error: err.message,
+          });
+        } else {
+          console.log("Gravação no banco de dados bem-sucedida:", res.rows[0]);
+          // Envia a resposta através do socket especificado
+          socket.emit(`log_response-${request.requestId}`, {
+            status: "Success",
+            data: res.rows[0],
+          });
+        }
 
-      // Após processar, processar a próxima requisição na fila
-      setTimeout(() => {
-        this.isProcessing = false;
-        this.processNextInQueue();
-      }, 5000); // Delay para simular o processamento e garantir exclusão mútua
-    });
+        // Após processar, processar a próxima requisição na fila
+        setTimeout(() => {
+          this.isProcessing = false;
+          this.processNextInQueue();
+        }, 5000); // Delay para simular o processamento e garantir exclusão mútua
+      });
   }
 
 }
