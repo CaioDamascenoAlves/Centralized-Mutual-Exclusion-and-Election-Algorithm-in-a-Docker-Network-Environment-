@@ -26,6 +26,8 @@ class DistributedNode {
     this.coordinatorIp = null;
     this.isCoordinator = false;
 
+    this.successorSocket = null;
+
     this.InElection = false;
     this.requestSent = false;
     this.inElection = false;
@@ -68,6 +70,7 @@ class DistributedNode {
         this.electionList = [];
         if(this.coordinatorIp == this.localIp) {
           this.isCoordinator = true;
+          await this.setupCoordinatorServer();
         }
         else {
           this.isCoordinator = false;
@@ -86,9 +89,10 @@ class DistributedNode {
   // Conecta com nó sucessor
   async electSuccessor() {
 
-    if(this.successorIp) {
-      this.successorIp = null;
-    }
+    this.successorIp = null;
+    this.successorSocket = null;
+
+    let clientSocket = null;
 
     for(const clientIp of Object.values(this.ipList)) {
       
@@ -96,43 +100,77 @@ class DistributedNode {
 
       if(clientPort > this.port) {
         
-        const clientSocket = await connecToNode(`${clientIp}:${clientPort}`);
+        clientSocket = await connecToNode(`${clientIp}:${clientPort}`);
         if(clientSocket && clientSocket.connected) {
           this.successorIp = clientIp;
+          this.successorSocket = clientSocket;
           return clientSocket
         }
       }
     }
 
-    const clientIp = Object.values(this.ipList)[0];
-    const clientPort = getClientPort(clientIp);
-    const clientSocket = await connecToNode(`${clientIp}:${clientPort}`);
-    if(clientSocket && clientSocket.connected) {
-      this.successorIp = clientIp;
-      return clientSocket
+    if(!clientSocket) {
+      const clientIp = Object.values(this.ipList)[0];
+      const clientPort = getClientPort(clientIp);
+      clientSocket = await connecToNode(`${clientIp}:${clientPort}`);
+      if(clientSocket && clientSocket.connected) {
+        this.successorIp = clientIp;
+        this.successorSocket = clientSocket;
+        return clientSocket
+      }
+
+      return await this.electSuccessor();
+    }
+  }
+
+  // Disconecta do nó Sucessor 
+  async removeSuccessor() {
+
+    if(this.successorSocket && this.successorSocket.connected) {
+      await this.successorSocket.disconnect();
     }
 
-    return await this.electSuccessor();
+    this.successorSocket = null; 
+    this.successorIp = null;
+  }
+
+  // Confere se à nó sucessor e o retorna
+  async getSuccessor() {
+
+    if(this.successorSocket && this.successorSocket.connected) {
+      return this.successorSocket;
+    }
+
+    await this.removeSuccessor();
+    const successorSocket = await this.electSuccessor();
+    return successorSocket;
   }
 
   // Disconecta do nó Coordenador
   async removeCoordinator() {
 
-    Object.keys(this.ipList).forEach(id => {
-      if (this.ipList[id] === this.coordinatorIp) {
-          delete this.ipList[id];
-      }
-    });
+    if(this.localIp !== this.coordinatorIp) {
+      Object.keys(this.ipList).forEach(id => {
+        if (this.ipList[id] === this.coordinatorIp) {
+            delete this.ipList[id];
+        }
+      });
+    }
 
     if(this.coordinatorIp && this.coordinatorIp == this.successorIp) {
-      await this.electSuccessor()
+      await this.removeSuccessor();
+      await this.electSuccessor();
     }
 
     this.coordinatorIp = null;
+    this.requestQueue = [];
   }
+
 
   // Inicia Eleição
   async startElection(electionList) {
+
+    await this.removeCoordinator();
 
     for(const clientPort of electionList) {
       if (!this.ipList.hasOwnProperty(clientPort)) {
@@ -146,12 +184,16 @@ class DistributedNode {
         }
 
         this.ipList = ipsToObjectSorted(this.ipList);
+        
+        if(this.port + 1 == clientPort) {
+          await this.electSuccessor();
+        }
       }
     }
 
     if( !electionList.includes(this.port) && ( electionList.length === 0 || electionList[0] > this.port ) ) {
 
-      const successorSocket = await this.electSuccessor();
+      const successorSocket = await this.getSuccessor()
 
       electionList.push(this.port);
       this.electionList = electionList;
@@ -159,9 +201,7 @@ class DistributedNode {
 
       if(successorSocket) {
         successorSocket.emit('ELEICAO', electionList);
-        successorSocket.disconnect();
       }
-
     }
     else if(electionList[0] == this.port){
 
@@ -177,9 +217,15 @@ class DistributedNode {
       }
       printEnvironmentVariables(this);
 
+      const successorSocket = await this.getSuccessor()
+      await successorSocket.emit('COORDENADOR', {
+        coordinator: coordinatorIp,
+        processList: electionList
+      });
+
       for(const clientIp of Object.values(this.ipList)) {
 
-        if(this.localIp !== clientIp) {
+        if(this.localIp !== clientIp && this.successorIp !== clientIp) {
 
           let clientPort = getClientPort(clientIp)
           let clientSocket = await connecToNode(`${clientIp}:${clientPort}`)
@@ -214,7 +260,6 @@ class DistributedNode {
           this.isCoordinator = false;
           this.requestQueue = [];
           await new Promise((resolve) => setTimeout(resolve, 80000));
-          await this.removeCoordinator();
           await this.startElection([]);
         });
       }
@@ -315,7 +360,6 @@ class DistributedNode {
       if(this.inElection && this.electionList.length == 0) {
         clearInterval(engine);
         coordinatorSocket.emit("Disconnect");
-        await this.removeCoordinator();
         await this.startElection([]);
       }
     }, MIN_INTERVAL);
