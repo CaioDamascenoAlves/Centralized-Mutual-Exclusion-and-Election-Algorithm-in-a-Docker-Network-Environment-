@@ -7,7 +7,7 @@ function printEnvironmentVariables(allInfos) {
         IP coodenador: ${allInfos.coordinatorIp}
         É o coodenador: ${allInfos.isCoordinator}
     `);
-    //console.table(allInfos.ipList)
+    console.table(allInfos.ipList)
 }
 
 module.exports = printEnvironmentVariables;
