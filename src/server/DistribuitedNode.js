@@ -79,6 +79,29 @@ class DistributedNode {
         
         printEnvironmentVariables(this);
       });
+
+      // Evento - Ouvir máquina se conectando ao anel
+      socket.on("reconnect", async (data) => {
+        await this.reconnect(data.port);
+        printEnvironmentVariables(this);
+      });
+
+      if(this.isCoordinator && !this.InElection) {
+        console.log("Nó conectado:", getClientIp(socket));
+
+        socket.on("log_request", (requestData) => {
+          console.log("Recebida solicitação de log:", requestData);
+          this.addToQueue(requestData, socket);
+        });
+
+        socket.on("Disconnect", async () => {
+          //await this.disconnectFromDatabase();
+          await this.removeCoordinator();
+          await new Promise((resolve) => setTimeout(resolve, 50000));
+          //await this.startElection([]);
+          await this.connectToRing();
+        });
+      }
     });
     
     await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -149,7 +172,7 @@ class DistributedNode {
   // Disconecta do nó Coordenador
   async removeCoordinator() {
 
-    if(this.localIp !== this.coordinatorIp) {
+    if(this.coordinatorIp && this.localIp !== this.coordinatorIp) {
       Object.keys(this.ipList).forEach(id => {
         if (this.ipList[id] === this.coordinatorIp) {
             delete this.ipList[id];
@@ -162,8 +185,49 @@ class DistributedNode {
       await this.electSuccessor();
     }
 
+    if(this.isCoordinator) {
+      this.isCoordinator = false;
+      this.requestQueue = [];
+    }
+
     this.coordinatorIp = null;
-    this.requestQueue = [];
+  }
+
+  // Reconecta máquina que estava inativa
+  async reconnect(portSee) {
+    if (!this.ipList.hasOwnProperty(portSee)) {
+      
+      let lastPart = portSee % 3000;
+      const ipSee = `172.25.0.${lastPart}`;
+      
+      this.ipList = {
+        ...this.ipList,
+        [portSee]: ipSee
+      }
+
+      this.ipList = ipsToObjectSorted(this.ipList);
+      
+      if(this.port + 1 == portSee) {
+        const successorSocket = await this.electSuccessor();
+        successorSocket.emit('COORDENADOR', {coordinator: this.coordinatorIp});
+      }
+    }
+  }
+
+  async connectToRing() {
+    for(const clientIp of Object.values(this.ipList)) {
+
+      if(this.localIp !== clientIp) {
+
+        let clientPort = getClientPort(clientIp)
+        let clientSocket = await connecToNode(`${clientIp}:${clientPort}`)
+
+        if(clientSocket && clientSocket.connected) {
+          clientSocket.emit('reconnect', {port: this.port});
+          clientSocket.disconnect();
+        }
+      }
+    }
   }
 
 
@@ -173,22 +237,7 @@ class DistributedNode {
     await this.removeCoordinator();
 
     for(const clientPort of electionList) {
-      if (!this.ipList.hasOwnProperty(clientPort)) {
-        
-        let lastPart = clientPort % 3000;
-        const clientIp = `172.25.0.${lastPart}`;
-        
-        this.ipList = {
-          ...this.ipList,
-          [clientPort]: clientIp
-        }
-
-        this.ipList = ipsToObjectSorted(this.ipList);
-        
-        if(this.port + 1 == clientPort) {
-          await this.electSuccessor();
-        }
-      }
+      await this.reconnect(clientPort);
     }
 
     if( !electionList.includes(this.port) && ( electionList.length === 0 || electionList[0] > this.port ) ) {
@@ -246,6 +295,7 @@ class DistributedNode {
   async setupCoordinatorServer() {
     await this.connectToDatabase();
 
+    /*
     this.io.on("connection", (socket) => {
       if(this.isCoordinator && !this.InElection) {
         console.log("Nó conectado:", getClientIp(socket));
@@ -254,16 +304,18 @@ class DistributedNode {
           console.log("Recebida solicitação de log:", requestData);
           this.addToQueue(requestData, socket);
         });
-  
+
         socket.on("Disconnect", async () => {
           //await this.disconnectFromDatabase();
-          this.isCoordinator = false;
-          this.requestQueue = [];
-          await new Promise((resolve) => setTimeout(resolve, 80000));
-          await this.startElection([]);
+          await this.removeCoordinator();
+          await new Promise((resolve) => setTimeout(resolve, 50000));
+          //await this.startElection([]);
+          await this.connectToRing();
+          return
         });
       }
     });
+    */
   }
 
   // Exemplo de requisição ao Coordenador
@@ -319,7 +371,6 @@ class DistributedNode {
 
   // Inicia um ciclo de solicitações aleatórias ao coordenador
   async initiateRandomRequests(coordinatorSocket) {
-
     const sendRequest = () => {
       if(!this.inElection && !this.isCoordinator) {
         const requestData = {
