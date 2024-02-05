@@ -412,6 +412,7 @@ class DistributedNode {
         clearInterval(engine);
         coordinatorSocket.emit("Disconnect");
         await this.startElection([]);
+        return
       }
     }, MIN_INTERVAL);
   }
