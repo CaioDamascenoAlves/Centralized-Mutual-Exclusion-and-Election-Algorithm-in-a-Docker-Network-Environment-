@@ -35,6 +35,7 @@ class DistributedNode {
     this.requestQueue = []; // Fila de requisições
     this.queueLimit = 6; // Limite máximo da fila
     this.isProcessing = false; // Flag para indicar se uma requisição está sendo processada
+
   }
 
   async initServer() {
@@ -155,7 +156,7 @@ class DistributedNode {
   async removeSuccessor() {
 
     if(this.successorSocket && this.successorSocket.connected) {
-      await this.successorSocket.disconnect();
+      await this.successorSocket.disconnect(true);
     }
 
     this.successorSocket = null; 
@@ -229,7 +230,7 @@ class DistributedNode {
 
         if(clientSocket && clientSocket.connected) {
           clientSocket.emit('reconnect', {port: this.port});
-          clientSocket.disconnect();
+          clientSocket.disconnect(true);
         }
       }
     }
@@ -288,7 +289,7 @@ class DistributedNode {
               coordinator: coordinatorIp,
               processList: electionList
             });
-            clientSocket.disconnect();
+            clientSocket.disconnect(true);
           }
         }
       }
@@ -303,7 +304,7 @@ class DistributedNode {
   // Exemplo de requisição ao Coordenador
   async setupRegularNodeServer() {
     if(!this.isCoordinator && !this.inElection) {
-      await new Promise((resolve) => setTimeout(resolve, 10000));
+      await new Promise((resolve) => setTimeout(resolve, 15000));
       let coordinatorPort = getClientPort(this.coordinatorIp);
       let coordinatorSocket = await connecToNode(`${this.coordinatorIp}:${coordinatorPort}`);
 
@@ -353,8 +354,9 @@ class DistributedNode {
 
   // Inicia um ciclo de solicitações aleatórias ao coordenador
   async initiateRandomRequests(coordinatorSocket) {
+    let tookTimeout = false
     const sendRequest = () => {
-      if(!this.inElection && !this.isCoordinator) {
+      if(!this.inElection && !this.isCoordinator && !tookTimeout) {
         const requestData = {
           type: "log_request",
           hostname: this.hostname,
@@ -363,42 +365,54 @@ class DistributedNode {
         };
 
         const timeout = setTimeout(async () => {
+
           console.log(
             `Tempo de resposta excedido para ${requestData.requestId}.`
           );
-          coordinatorSocket.off(`log_response-${requestData.requestId}`);
 
-          this.inElection = true;
+          coordinatorSocket.off(`log_response-${requestData.requestId}`);
+          tookTimeout = true;
           clearTimeout(timeout);
         }, TIMEOUT_LIMIT);
-
         
-        if(!this.inElection && !this.isCoordinator) {
-          coordinatorSocket.once(
-            `log_response-${requestData.requestId}`,
-            (response) => {
-              clearTimeout(timeout);
-              console.log("Resposta recebida do coordenador:", response);
-              coordinatorSocket.off(`log_response-${requestData.requestId}`);
-            }
-          );
-        }
-  
+        coordinatorSocket.once(
+          `log_response-${requestData.requestId}`,
+          (response) => {
+            clearTimeout(timeout);
+            console.log("Resposta recebida do coordenador:", response);
+            coordinatorSocket.off(`log_response-${requestData.requestId}`);
+          }
+        );
+
         coordinatorSocket.emit("log_request", requestData);
       }
-    };
+    }
 
     let engine = setInterval(async () => {
-      const randomDelay = Math.random() * MAX_INTERVAL;
-      setTimeout(sendRequest, randomDelay);
-
-      if(this.inElection && this.electionList.length == 0) {
+      if(tookTimeout && !this.inElection && this.electionList.length == 0) {
         clearInterval(engine);
-        coordinatorSocket.emit("Disconnect");
+        await coordinatorSocket.emit("Disconnect");
+        //await coordinatorSocket.disconnect(true);
+        this.inElection = true;
         await this.startElection([]);
-        return
+        //return
       }
+      
+      if(this.inElection) {
+        clearInterval(engine);
+        tookTimeout = true;
+        //await coordinatorSocket.disconnect(true);
+        //return
+      }
+
+      if(!this.inElection && !this.isCoordinator) {
+        const randomDelay = Math.random() * MAX_INTERVAL;
+        setTimeout(sendRequest, randomDelay);
+      }
+
     }, MIN_INTERVAL);
+
+
   }
 
   // Adiciona na fila
