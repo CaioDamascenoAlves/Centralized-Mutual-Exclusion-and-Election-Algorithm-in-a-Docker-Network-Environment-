@@ -64,7 +64,6 @@ class DistributedNode {
 
       // Evento - Ouvir coodenador eleito
       socket.on("COORDENADOR", async (data) => {
-        console.log("NOVO COODENADOR DEFINIDO");
         await new Promise((resolve) => setTimeout(resolve, 15000));
         this.coordinatorIp = data.coordinator;
         this.inElection = false;
@@ -105,7 +104,7 @@ class DistributedNode {
         console.log("Nó conectado:", getClientIp(socket));
 
         socket.on("log_request", (requestData) => {
-          //console.log("Recebida solicitação de log:", requestData);
+          console.log("Recebida solicitação de log:", requestData);
           this.addToQueue(requestData, socket);
         });
       }
@@ -241,8 +240,6 @@ class DistributedNode {
 
   // Inicia Eleição
   async startElection(electionList) {
-    console.log("ENTROU NA ELEIÇÃO");
-
     for(const clientPort of electionList) {
       await this.reconnect(clientPort);
     }
@@ -250,7 +247,6 @@ class DistributedNode {
     if(!electionList.includes(this.port) && ( electionList.length === 0 || electionList[0] > this.port ) ) {
       this.inElection = true;
       await this.removeCoordinator();
-      console.log("ELEIÇÃO - PASSOU PARA FRENTE");
       const successorSocket = await this.getSuccessor()
 
       electionList.push(this.port);
@@ -277,8 +273,6 @@ class DistributedNode {
       }
     }
     else if(electionList[0] == this.port){
-      console.log("ELEIÇÃO - FIM DA ELEIÇÃO");
-
       const coordinatorPort = Math.max(...electionList);
       const coordinatorIp = this.ipList[coordinatorPort];
 
@@ -413,23 +407,18 @@ class DistributedNode {
         await coordinatorSocket.emit("Disconnect");
         //await coordinatorSocket.disconnect(true);
         this.inElection = true;
-        console.log(`TIMEOUT - INICIAR A ELEIÇÃO COODENADOR ${this.coordinatorIp} CAIU`);
         await this.startElection([]);
         return
       }
       
       if(this.inElection) {
-        console.log(`EM ELEIÇÃO E TENTANDO FAZER REQUISIÇÃO PARA COODENADOR ${this.coordinatorIp}`);
         clearTimeout(called);
         clearInterval(engine);
         tookTimeout = true;
-        //await this.startElection([]);
-        //await coordinatorSocket.disconnect(true);
         return
       }
 
       if(!tookTimeout && !this.inElection && !this.isCoordinator) {
-        console.log(`FAZENDO REQUISIÇÃO PARA ENVIAR AO COODENADOR ${this.coordinatorIp}`);
         const randomDelay = Math.random() * MAX_INTERVAL;
         called = setTimeout(sendRequest, randomDelay);
       }
@@ -443,7 +432,7 @@ class DistributedNode {
   addToQueue(requestData, socket) {
       if (this.requestQueue.length < this.queueLimit) {
         this.requestQueue.push({ requestData, socket });
-        //console.log("Requisição adicionada à fila:", requestData);
+        console.log("Requisição adicionada à fila:", requestData);
       } else {
         // Opção de tratamento quando a fila está cheia
         console.log("Tamanho máximo da fila atingido. ");
@@ -466,7 +455,7 @@ class DistributedNode {
 
   // Processa uma requisição específica
   processRequest(request, socket) {
-      //console.log("Processando requisição:", request);
+      console.log("Processando requisição:", request);
 
       const queryText =
         "INSERT INTO log_entries(hostname, timestamp) VALUES($1, $2)";
