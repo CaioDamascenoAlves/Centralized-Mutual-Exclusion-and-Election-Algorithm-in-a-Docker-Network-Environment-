@@ -260,7 +260,6 @@ class DistributedNode {
     else if(!this.inElection && !electionList.includes(this.port) && electionList[0] < this.port) {
       this.inElection = true;
       await this.removeCoordinator();
-      console.log("ELEIÇÃO - REINICIOU");
       const successorSocket = await this.getSuccessor()
 
       electionList = [];
