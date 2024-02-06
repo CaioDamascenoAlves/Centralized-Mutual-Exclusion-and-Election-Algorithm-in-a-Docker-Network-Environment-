@@ -28,7 +28,6 @@ class DistributedNode {
 
     this.successorSocket = null;
 
-    this.InElection = false;
     this.requestSent = false;
     this.inElection = false;
     this.electionList = [];
@@ -86,20 +85,26 @@ class DistributedNode {
         printEnvironmentVariables(this);
       });
 
-      if(this.isCoordinator && !this.InElection) {
+      // Evento - Remove o coorndenador e se conecta de novo ao anel
+      socket.on("Disconnect", async () => {
+
+        socket.off("log_request", (requestData) => {
+          console.log("Recebida solicitação de log:", requestData);
+          this.addToQueue(requestData, socket);
+        });
+        
+        await this.removeCoordinator();
+        await new Promise((resolve) => setTimeout(resolve, 80000));
+        await this.connectToRing();
+      });
+
+      // Evento - Ouve requests dos nós regulares
+      if(this.isCoordinator && !this.inElection) {
         console.log("Nó conectado:", getClientIp(socket));
 
         socket.on("log_request", (requestData) => {
           console.log("Recebida solicitação de log:", requestData);
           this.addToQueue(requestData, socket);
-        });
-
-        socket.on("Disconnect", async () => {
-          //await this.disconnectFromDatabase();
-          await this.removeCoordinator();
-          await new Promise((resolve) => setTimeout(resolve, 50000));
-          //await this.startElection([]);
-          await this.connectToRing();
         });
       }
     });
@@ -230,7 +235,6 @@ class DistributedNode {
     }
   }
 
-
   // Inicia Eleição
   async startElection(electionList) {
 
@@ -294,33 +298,11 @@ class DistributedNode {
   // Configurar servidor do coordenador
   async setupCoordinatorServer() {
     await this.connectToDatabase();
-
-    /*
-    this.io.on("connection", (socket) => {
-      if(this.isCoordinator && !this.InElection) {
-        console.log("Nó conectado:", getClientIp(socket));
-
-        socket.on("log_request", (requestData) => {
-          console.log("Recebida solicitação de log:", requestData);
-          this.addToQueue(requestData, socket);
-        });
-
-        socket.on("Disconnect", async () => {
-          //await this.disconnectFromDatabase();
-          await this.removeCoordinator();
-          await new Promise((resolve) => setTimeout(resolve, 50000));
-          //await this.startElection([]);
-          await this.connectToRing();
-          return
-        });
-      }
-    });
-    */
   }
 
   // Exemplo de requisição ao Coordenador
   async setupRegularNodeServer() {
-    if(!this.isCoordinator && !this.InElection) {
+    if(!this.isCoordinator && !this.inElection) {
       await new Promise((resolve) => setTimeout(resolve, 10000));
       let coordinatorPort = getClientPort(this.coordinatorIp);
       let coordinatorSocket = await connecToNode(`${this.coordinatorIp}:${coordinatorPort}`);
@@ -390,15 +372,17 @@ class DistributedNode {
           clearTimeout(timeout);
         }, TIMEOUT_LIMIT);
 
-      
-        coordinatorSocket.once(
-          `log_response-${requestData.requestId}`,
-          (response) => {
-            clearTimeout(timeout);
-            console.log("Resposta recebida do coordenador:", response);
-            coordinatorSocket.off(`log_response-${requestData.requestId}`);
-          }
-        );
+        
+        if(!this.inElection && !this.isCoordinator) {
+          coordinatorSocket.once(
+            `log_response-${requestData.requestId}`,
+            (response) => {
+              clearTimeout(timeout);
+              console.log("Resposta recebida do coordenador:", response);
+              coordinatorSocket.off(`log_response-${requestData.requestId}`);
+            }
+          );
+        }
   
         coordinatorSocket.emit("log_request", requestData);
       }
