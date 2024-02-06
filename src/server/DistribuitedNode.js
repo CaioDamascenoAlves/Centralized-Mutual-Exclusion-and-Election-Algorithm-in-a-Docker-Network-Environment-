@@ -392,16 +392,17 @@ class DistributedNode {
       if(tookTimeout && !this.inElection && this.electionList.length == 0) {
         clearInterval(engine);
         await coordinatorSocket.emit("Disconnect");
-        await coordinatorSocket.disconnect(true);
+        //await coordinatorSocket.disconnect(true);
         this.inElection = true;
         await this.startElection([]);
-        return
+        //return
       }
       
       if(this.inElection) {
         clearInterval(engine);
-        await coordinatorSocket.disconnect(true);
-        return
+        tookTimeout = true;
+        //await coordinatorSocket.disconnect(true);
+        //return
       }
 
       if(!this.inElection && !this.isCoordinator) {
