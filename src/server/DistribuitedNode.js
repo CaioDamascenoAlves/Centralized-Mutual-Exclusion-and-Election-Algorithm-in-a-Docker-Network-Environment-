@@ -7,6 +7,7 @@ const ipsToObjectSorted = require("./utils/IpsToObjectSorted");
 const connecToNode = require("./utils/ConnecToNode");
 const getClientIp = require("./utils/GetClientIp");
 const getClientPort = require("./utils/GetClientPort");
+const { copyFileSync } = require("fs");
 
 const MIN_INTERVAL = 15000; // 15 segundos
 const MAX_INTERVAL = 25000; // 25 segundos
@@ -58,13 +59,12 @@ class DistributedNode {
 
       // Evento - Ouvir iniciar eleição
       socket.on("ELEICAO", async(data) => {
-        this.inElection = true;
         await this.startElection(data);
       });
 
       // Evento - Ouvir coodenador eleito
       socket.on("COORDENADOR", async (data) => {
-
+        await new Promise((resolve) => setTimeout(resolve, 15000));
         this.coordinatorIp = data.coordinator;
         this.inElection = false;
         this.electionList = [];
@@ -217,6 +217,8 @@ class DistributedNode {
         const successorSocket = await this.electSuccessor();
         successorSocket.emit('COORDENADOR', {coordinator: this.coordinatorIp});
       }
+
+      console.log(`Nó ${ipSee}:${portSee} Entrou na rede!`);
     }
   }
 
@@ -238,15 +240,13 @@ class DistributedNode {
 
   // Inicia Eleição
   async startElection(electionList) {
-
-    await this.removeCoordinator();
-
     for(const clientPort of electionList) {
       await this.reconnect(clientPort);
     }
 
-    if( !electionList.includes(this.port) && ( electionList.length === 0 || electionList[0] > this.port ) ) {
-
+    if(!electionList.includes(this.port) && ( electionList.length === 0 || electionList[0] > this.port ) ) {
+      this.inElection = true;
+      await this.removeCoordinator();
       const successorSocket = await this.getSuccessor()
 
       electionList.push(this.port);
@@ -257,8 +257,21 @@ class DistributedNode {
         successorSocket.emit('ELEICAO', electionList);
       }
     }
-    else if(electionList[0] == this.port){
+    else if(!this.inElection && !electionList.includes(this.port) && electionList[0] < this.port) {
+      this.inElection = true;
+      await this.removeCoordinator();
+      const successorSocket = await this.getSuccessor()
 
+      electionList = [];
+      electionList.push(this.port);
+      this.electionList = electionList;
+      console.log(`Lista de Processos da Eleição: [${electionList}]`);
+
+      if(successorSocket) {
+        successorSocket.emit('ELEICAO', electionList);
+      }
+    }
+    else if(electionList[0] == this.port){
       const coordinatorPort = Math.max(...electionList);
       const coordinatorIp = this.ipList[coordinatorPort];
 
@@ -304,7 +317,7 @@ class DistributedNode {
   // Exemplo de requisição ao Coordenador
   async setupRegularNodeServer() {
     if(!this.isCoordinator && !this.inElection) {
-      await new Promise((resolve) => setTimeout(resolve, 15000));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
       let coordinatorPort = getClientPort(this.coordinatorIp);
       let coordinatorSocket = await connecToNode(`${this.coordinatorIp}:${coordinatorPort}`);
 
@@ -354,7 +367,8 @@ class DistributedNode {
 
   // Inicia um ciclo de solicitações aleatórias ao coordenador
   async initiateRandomRequests(coordinatorSocket) {
-    let tookTimeout = false
+    let tookTimeout = false;
+    let called = null;
     const sendRequest = () => {
       if(!this.inElection && !this.isCoordinator && !tookTimeout) {
         const requestData = {
@@ -365,14 +379,11 @@ class DistributedNode {
         };
 
         const timeout = setTimeout(async () => {
-
-          console.log(
-            `Tempo de resposta excedido para ${requestData.requestId}.`
-          );
-
+          console.log(`Tempo de resposta excedido para ${requestData.requestId}.`);
           coordinatorSocket.off(`log_response-${requestData.requestId}`);
           tookTimeout = true;
           clearTimeout(timeout);
+          clearTimeout(called);
         }, TIMEOUT_LIMIT);
         
         coordinatorSocket.once(
@@ -390,24 +401,25 @@ class DistributedNode {
 
     let engine = setInterval(async () => {
       if(tookTimeout && !this.inElection && this.electionList.length == 0) {
+        clearTimeout(called);
         clearInterval(engine);
         await coordinatorSocket.emit("Disconnect");
         //await coordinatorSocket.disconnect(true);
         this.inElection = true;
         await this.startElection([]);
-        //return
+        return
       }
       
       if(this.inElection) {
+        clearTimeout(called);
         clearInterval(engine);
         tookTimeout = true;
-        //await coordinatorSocket.disconnect(true);
-        //return
+        return
       }
 
-      if(!this.inElection && !this.isCoordinator) {
+      if(!tookTimeout && !this.inElection && !this.isCoordinator) {
         const randomDelay = Math.random() * MAX_INTERVAL;
-        setTimeout(sendRequest, randomDelay);
+        called = setTimeout(sendRequest, randomDelay);
       }
 
     }, MIN_INTERVAL);
